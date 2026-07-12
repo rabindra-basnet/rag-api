@@ -2958,6 +2958,7 @@ dependencies = [
  "axum-extra",
  "chrono",
  "dotenvy",
+ "flate2",
  "hex",
  "http-body-util",
  "image",

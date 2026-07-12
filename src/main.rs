@@ -1,8 +1,8 @@
 use rag_backend::config;
 use rag_backend::error;
+use rag_backend::logger;
 use rag_backend::routes;
 use rag_backend::state::app_state::AppState;
-use tracing_subscriber::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -14,34 +14,7 @@ async fn main() -> anyhow::Result<()> {
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    let default_filter = if dev {
-        "rag_backend=trace,tower_http=debug,sqlx=debug"
-    } else {
-        "rag_backend=info,tower_http=info"
-    };
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| default_filter.into());
-
-    let logs_dir = std::path::Path::new("logs");
-    if !logs_dir.exists() {
-        std::fs::create_dir_all(logs_dir).ok();
-    }
-    let file_appender = tracing_appender::rolling::daily("logs", "app.log");
-    let file_layer = tracing_subscriber::fmt::layer()
-        .with_writer(file_appender)
-        .with_ansi(false)
-        .with_target(true)
-        .with_filter(filter.clone());
-
-    let console_layer = tracing_subscriber::fmt::layer()
-        .with_file(dev)
-        .with_line_number(dev)
-        .with_filter(filter);
-
-    tracing_subscriber::registry()
-        .with(file_layer)
-        .with(console_layer)
-        .init();
+    logger::init(dev);
 
     let cfg = config::parameter::get();
     tracing::info!(environment = cfg.environment, "starting");

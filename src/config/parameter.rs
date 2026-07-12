@@ -101,7 +101,7 @@ impl Config {
             cors_expose_headers: env_or("CORS_EXPOSE_HEADERS", ""),
             allowed_file_extensions: env_or(
                 "ALLOWED_FILE_EXTENSIONS",
-                ".txt,.md,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp,.gif,.xml,.html",
+                ".txt,.md,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp,.gif,.xml,.html,.docx",
             ),
             auth_rate_per_second: env_parse("AUTH_RATE_PER_SECOND", 1),
             auth_rate_burst: env_parse("AUTH_RATE_BURST", 1),
