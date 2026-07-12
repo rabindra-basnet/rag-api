@@ -2,24 +2,11 @@ mod auth;
 mod db;
 mod error;
 mod llm;
+mod middleware;
 mod rag;
+mod routes;
 mod state;
 mod validation;
-
-use std::time::Duration;
-
-use axum::http::header::AUTHORIZATION;
-use axum::middleware;
-use axum::routing::{delete, get, post, put};
-use axum::Router;
-use tower_http::catch_panic::CatchPanicLayer;
-use tower_http::compression::CompressionLayer;
-use tower_http::cors::CorsLayer;
-use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetRequestIdLayer};
-use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
-use tower_http::timeout::TimeoutLayer;
-use tower_http::trace::TraceLayer;
 
 use state::{openai_client, AppState, Config};
 
@@ -43,42 +30,11 @@ async fn main() -> anyhow::Result<()> {
         cfg,
     };
 
-    let protected = Router::new()
-        .route("/auth/me", get(auth::handlers::me))
-        .route("/documents", post(rag::handlers::ingest_document))
-        .route("/documents", get(rag::handlers::list_documents))
-        .route("/documents/{id}", put(rag::handlers::update_document))
-        .route("/documents/{id}", delete(rag::handlers::delete_document))
-        .route("/chat", post(rag::handlers::chat))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::middleware::require_auth,
-        ));
+    let bind_addr = state.cfg.bind_addr.clone();
+    let app = routes::router(state);
 
-    let app = Router::new()
-        .route("/health", get(|| async { "ok" }))
-        .route("/auth/register", post(auth::handlers::register))
-        .route("/auth/login", post(auth::handlers::login))
-        .route("/auth/refresh", post(auth::handlers::refresh))
-        .route("/auth/logout", post(auth::handlers::logout))
-        .merge(protected)
-        // Layers run top-to-bottom on the request, bottom-to-top on the response.
-        .layer(CatchPanicLayer::new()) // panic in a handler -> 500, not a dropped connection
-        .layer(SetRequestIdLayer::x_request_id(MakeRequestUuid))
-        .layer(PropagateRequestIdLayer::x_request_id())
-        .layer(SetSensitiveRequestHeadersLayer::new([AUTHORIZATION])) // redact from traces
-        .layer(TraceLayer::new_for_http())
-        // Generous timeout: /documents and /chat wait on upstream LLM calls.
-        .layer(TimeoutLayer::new(Duration::from_secs(120)))
-        .layer(CorsLayer::permissive())
-        .layer(CompressionLayer::new())
-        // Documents are capped at 10 MB each in the handler; this is the
-        // whole-request cap so a JSON batch of several documents still fits.
-        .layer(RequestBodyLimitLayer::new(50 * 1024 * 1024)) // 50 MiB
-        .with_state(state.clone());
-
-    let listener = tokio::net::TcpListener::bind(&state.cfg.bind_addr).await?;
-    tracing::info!("listening on {}", state.cfg.bind_addr);
+    let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
+    tracing::info!("listening on {bind_addr}");
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
