@@ -60,36 +60,34 @@ pub async fn rotate(
     let claims = verify_refresh_token(jwt_secret, token)?;
 
     let hash = hash_token(token);
-    let row: Option<(String, String, String, String, Option<String>)> = sqlx::query_as(
-        "SELECT id, user_id, family_id, expires_at, revoked_at
-         FROM refresh_tokens WHERE token_hash = ?",
-    )
-    .bind(&hash)
-    .fetch_optional(db)
-    .await?;
+    let row: Option<crate::models::RefreshToken> =
+        sqlx::query_as("SELECT * FROM refresh_tokens WHERE token_hash = ?")
+            .bind(&hash)
+            .fetch_optional(db)
+            .await?;
 
-    let Some((id, user_id, family_id, expires_at, revoked_at)) = row else {
+    let Some(row) = row else {
         return Err(ApiError::Unauthorized);
     };
 
     // The signed sub must match the row we found for that token.
-    if claims.sub != user_id {
+    if claims.sub != row.user_id {
         return Err(ApiError::Unauthorized);
     }
 
-    if revoked_at.is_some() {
+    if row.revoked_at.is_some() {
         // Token reuse — revoke the entire family.
-        tracing::warn!(user_id, "refresh token reuse detected; revoking family");
+        tracing::warn!(user_id = row.user_id, "refresh token reuse detected; revoking family");
         sqlx::query("UPDATE refresh_tokens SET revoked_at = ? WHERE family_id = ? AND revoked_at IS NULL")
             .bind(Utc::now().to_rfc3339())
-            .bind(&family_id)
+            .bind(&row.family_id)
             .execute(db)
             .await?;
         return Err(ApiError::Unauthorized);
     }
 
     // DB-side expiry check (belt to the JWT exp's suspenders).
-    let expired = chrono::DateTime::parse_from_rfc3339(&expires_at)
+    let expired = chrono::DateTime::parse_from_rfc3339(&row.expires_at)
         .map(|t| t < Utc::now())
         .unwrap_or(true);
     if expired {
@@ -98,12 +96,12 @@ pub async fn rotate(
 
     sqlx::query("UPDATE refresh_tokens SET revoked_at = ? WHERE id = ?")
         .bind(Utc::now().to_rfc3339())
-        .bind(&id)
+        .bind(&row.id)
         .execute(db)
         .await?;
 
-    let user_uuid = Uuid::parse_str(&user_id).map_err(|_| ApiError::Unauthorized)?;
-    let family_uuid = Uuid::parse_str(&family_id).ok();
+    let user_uuid = Uuid::parse_str(&row.user_id).map_err(|_| ApiError::Unauthorized)?;
+    let family_uuid = Uuid::parse_str(&row.family_id).ok();
     let issued = issue(db, jwt_secret, user_uuid, family_uuid, ttl_days).await?;
 
     Ok(RotatedRefresh {

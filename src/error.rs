@@ -27,9 +27,9 @@ impl From<sqlx::Error> for ApiError {
     }
 }
 
-impl From<async_openai::error::OpenAIError> for ApiError {
-    fn from(e: async_openai::error::OpenAIError) -> Self {
-        tracing::error!(error = %e, "llm upstream error");
+impl From<reqwest::Error> for ApiError {
+    fn from(e: reqwest::Error) -> Self {
+        tracing::error!(error = %e, "llm upstream request error");
         ApiError::Internal("llm upstream error".into())
     }
 }

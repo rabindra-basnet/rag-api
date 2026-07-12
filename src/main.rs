@@ -1,18 +1,10 @@
-mod auth;
-mod db;
-mod error;
-mod llm;
-mod middleware;
-mod rag;
-mod routes;
-mod state;
-mod validation;
-
-use state::{openai_client, AppState, Config};
+use rag_backend::state::{http_client, AppState, Config};
+use rag_backend::{db, routes};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
+    
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -25,8 +17,7 @@ async fn main() -> anyhow::Result<()> {
 
     let state = AppState {
         db: pool,
-        llm: openai_client(&cfg.llm_base_url, &cfg.llm_api_key),
-        embeddings: openai_client(&cfg.embeddings_base_url, &cfg.embeddings_api_key),
+        http: http_client(),
         cfg,
     };
 
@@ -42,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    .await?;
     Ok(())
 }
 

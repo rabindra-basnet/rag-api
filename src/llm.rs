@@ -1,55 +1,94 @@
-use async_openai::types::chat::{
-    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
-    ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs,
-};
-use async_openai::types::embeddings::{CreateEmbeddingRequestArgs, EmbeddingInput};
+//! OpenAI-compatible API client (OpenRouter, OpenAI, Ollama, ...) over
+//! plain reqwest — chat completions and embeddings.
+
+use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 use crate::error::ApiError;
 use crate::state::AppState;
 
+#[derive(Serialize)]
 pub struct ChatMessage {
     pub role: &'static str,
     pub content: String,
 }
 
-fn to_openai_message(m: ChatMessage) -> Result<ChatCompletionRequestMessage, ApiError> {
-    let msg = match m.role {
-        "system" => ChatCompletionRequestSystemMessageArgs::default()
-            .content(m.content)
-            .build()
-            .map(ChatCompletionRequestMessage::System),
-        _ => ChatCompletionRequestUserMessageArgs::default()
-            .content(m.content)
-            .build()
-            .map(ChatCompletionRequestMessage::User),
-    };
-    msg.map_err(|e| {
-        tracing::error!(error = %e, "message build failure");
-        ApiError::Internal("llm request build failure".into())
-    })
+#[derive(Deserialize)]
+struct ChatResponse {
+    choices: Vec<Choice>,
+}
+
+#[derive(Deserialize)]
+struct Choice {
+    message: ChoiceMessage,
+}
+
+#[derive(Deserialize)]
+struct ChoiceMessage {
+    content: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct EmbeddingsResponse {
+    data: Vec<EmbeddingItem>,
+}
+
+#[derive(Deserialize)]
+struct EmbeddingItem {
+    embedding: Vec<f32>,
+}
+
+fn auth_header(key: &Option<String>) -> Result<String, ApiError> {
+    key.as_deref()
+        .map(|k| format!("Bearer {k}"))
+        .ok_or_else(|| ApiError::Internal("LLM api key not configured".into()))
+}
+
+async fn post_json<T: serde::de::DeserializeOwned>(
+    state: &AppState,
+    base_url: &str,
+    api_key: &Option<String>,
+    path: &str,
+    body: serde_json::Value,
+    what: &str,
+) -> Result<T, ApiError> {
+    let url = format!("{}{}", base_url.trim_end_matches('/'), path);
+    let resp = state
+        .http
+        .post(&url)
+        .header("Authorization", auth_header(api_key)?)
+        .json(&body)
+        .send()
+        .await?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+        tracing::error!(%status, body, "{what} upstream error");
+        return Err(ApiError::Internal(format!("{what} upstream error")));
+    }
+    Ok(resp.json().await?)
 }
 
 pub async fn chat_completion(
     state: &AppState,
     messages: Vec<ChatMessage>,
 ) -> Result<String, ApiError> {
-    let messages = messages
-        .into_iter()
-        .map(to_openai_message)
-        .collect::<Result<Vec<_>, _>>()?;
+    let parsed: ChatResponse = post_json(
+        state,
+        &state.cfg.llm_base_url,
+        &state.cfg.llm_api_key,
+        "/chat/completions",
+        json!({
+            "model": state.cfg.llm_model,
+            "max_tokens": state.cfg.llm_max_tokens,
+            "messages": messages,
+        }),
+        "chat completion",
+    )
+    .await?;
 
-    let request = CreateChatCompletionRequestArgs::default()
-        .model(&state.cfg.llm_model)
-        .max_completion_tokens(state.cfg.llm_max_tokens)
-        .messages(messages)
-        .build()
-        .map_err(|e| {
-            tracing::error!(error = %e, "chat request build failure");
-            ApiError::Internal("llm request build failure".into())
-        })?;
-
-    let response = state.llm.chat().create(request).await?;
-    response
+    parsed
         .choices
         .into_iter()
         .next()
@@ -59,18 +98,21 @@ pub async fn chat_completion(
 
 /// Batch-embed texts via an OpenAI-compatible /embeddings endpoint.
 pub async fn embed(state: &AppState, texts: &[String]) -> Result<Vec<Vec<f32>>, ApiError> {
-    let request = CreateEmbeddingRequestArgs::default()
-        .model(&state.cfg.embeddings_model)
-        .input(EmbeddingInput::StringArray(texts.to_vec()))
-        .build()
-        .map_err(|e| {
-            tracing::error!(error = %e, "embedding request build failure");
-            ApiError::Internal("embeddings request build failure".into())
-        })?;
+    let parsed: EmbeddingsResponse = post_json(
+        state,
+        &state.cfg.embeddings_base_url,
+        &state.cfg.embeddings_api_key,
+        "/embeddings",
+        json!({
+            "model": state.cfg.embeddings_model,
+            "input": texts,
+        }),
+        "embeddings",
+    )
+    .await?;
 
-    let response = state.embeddings.embeddings().create(request).await?;
-    if response.data.len() != texts.len() {
+    if parsed.data.len() != texts.len() {
         return Err(ApiError::Internal("embeddings count mismatch".into()));
     }
-    Ok(response.data.into_iter().map(|d| d.embedding).collect())
+    Ok(parsed.data.into_iter().map(|d| d.embedding).collect())
 }

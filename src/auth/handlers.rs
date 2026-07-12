@@ -105,8 +105,8 @@ pub async fn login(
     crate::validation::ValidatedJson(req): crate::validation::ValidatedJson<LoginReq>,
 ) -> Result<(CookieJar, Json<Value>), ApiError> {
     let email = req.email.trim().to_lowercase();
-    let row: Option<(String, String)> =
-        sqlx::query_as("SELECT id, password_hash FROM users WHERE email = ?")
+    let row: Option<crate::models::User> =
+        sqlx::query_as("SELECT * FROM users WHERE email = ?")
             .bind(&email)
             .fetch_optional(&state.db)
             .await?;
@@ -115,7 +115,7 @@ pub async fn login(
     // timing consistent (no user-enumeration via response latency).
     const DUMMY_HASH: &str = "$argon2id$v=19$m=19456,t=2,p=1$AAAAAAAAAAAAAAAAAAAAAA$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
     let (id, hash) = match &row {
-        Some((id, hash)) => (Some(id), hash.as_str()),
+        Some(u) => (Some(&u.id), u.password_hash.as_str()),
         None => (None, DUMMY_HASH),
     };
     let ok = verify_password(&req.password, hash);
@@ -141,11 +141,12 @@ pub async fn refresh(
     )
     .await?;
 
-    let (email,): (String,) = sqlx::query_as("SELECT email FROM users WHERE id = ?")
+    let user: crate::models::User = sqlx::query_as("SELECT * FROM users WHERE id = ?")
         .bind(rotated.user_id.to_string())
         .fetch_optional(&state.db)
         .await?
         .ok_or(ApiError::Unauthorized)?;
+    let email = user.email;
 
     let access = issue_access_token(
         &state.cfg.jwt_secret,

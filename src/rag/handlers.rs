@@ -229,8 +229,8 @@ pub async fn list_documents(
     State(state): State<AppState>,
     user: AuthUser,
 ) -> Result<Json<Value>, ApiError> {
-    let rows: Vec<(String, String, String, i64)> = sqlx::query_as(
-        "SELECT d.id, d.title, d.created_at, COUNT(c.id)
+    let docs: Vec<crate::models::DocumentSummary> = sqlx::query_as(
+        "SELECT d.id, d.title, d.created_at, COUNT(c.id) AS chunks
          FROM documents d LEFT JOIN chunks c ON c.document_id = d.id
          WHERE d.user_id = ?
          GROUP BY d.id ORDER BY d.created_at DESC",
@@ -239,12 +239,6 @@ pub async fn list_documents(
     .fetch_all(&state.db)
     .await?;
 
-    let docs: Vec<Value> = rows
-        .into_iter()
-        .map(|(id, title, created_at, chunks)| {
-            json!({ "id": id, "title": title, "created_at": created_at, "chunks": chunks })
-        })
-        .collect();
     Ok(Json(json!({ "documents": docs })))
 }
 
@@ -283,7 +277,7 @@ pub async fn chat(
 
     // Brute-force cosine scan over the user's chunks. Fine for SQLite scale;
     // swap for a vector index (e.g. sqlite-vec, Qdrant) when corpora grow.
-    let rows: Vec<(String, String, String, Vec<u8>)> = sqlx::query_as(
+    let rows: Vec<crate::models::ChunkHit> = sqlx::query_as(
         "SELECT c.content, c.document_id, d.title, c.embedding
          FROM chunks c JOIN documents d ON d.id = c.document_id
          WHERE c.user_id = ?",
@@ -292,11 +286,11 @@ pub async fn chat(
     .fetch_all(&state.db)
     .await?;
 
-    let mut scored: Vec<(f32, String, String, String)> = rows
+    let mut scored: Vec<(f32, crate::models::ChunkHit)> = rows
         .into_iter()
-        .map(|(content, doc_id, title, blob)| {
-            let sim = vectors::cosine_similarity(&query_emb, &vectors::decode(&blob));
-            (sim, content, doc_id, title)
+        .map(|hit| {
+            let sim = vectors::cosine_similarity(&query_emb, &vectors::decode(&hit.embedding));
+            (sim, hit)
         })
         .collect();
     scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
@@ -310,8 +304,8 @@ pub async fn chat(
     }
 
     let mut context = String::new();
-    for (i, (_, content, _, title)) in scored.iter().enumerate() {
-        context.push_str(&format!("[{}] (from \"{}\")\n{}\n\n", i + 1, title, content));
+    for (i, (_, hit)) in scored.iter().enumerate() {
+        context.push_str(&format!("[{}] (from \"{}\")\n{}\n\n", i + 1, hit.title, hit.content));
     }
 
     let system = "You are a helpful assistant. Answer the user's question using ONLY the \
@@ -332,13 +326,13 @@ pub async fn chat(
     let sources: Vec<Value> = scored
         .iter()
         .enumerate()
-        .map(|(i, (score, content, doc_id, title))| {
+        .map(|(i, (score, hit))| {
             json!({
                 "index": i + 1,
-                "document_id": doc_id,
-                "title": title,
+                "document_id": hit.document_id,
+                "title": hit.title,
                 "score": score,
-                "snippet": content.chars().take(200).collect::<String>(),
+                "snippet": hit.content.chars().take(200).collect::<String>(),
             })
         })
         .collect();

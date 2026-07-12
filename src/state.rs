@@ -1,23 +1,18 @@
-use async_openai::config::OpenAIConfig;
-use async_openai::Client;
 use sqlx::SqlitePool;
 
 #[derive(Clone)]
 pub struct AppState {
     pub db: SqlitePool,
     pub cfg: Config,
-    /// Chat-completions client (OpenRouter or any OpenAI-compatible API).
-    pub llm: Client<OpenAIConfig>,
-    /// Embeddings client; may point at a different provider than `llm`.
-    pub embeddings: Client<OpenAIConfig>,
+    /// Shared HTTP client for the OpenAI-compatible upstreams.
+    pub http: reqwest::Client,
 }
 
-pub fn openai_client(base_url: &str, api_key: &Option<String>) -> Client<OpenAIConfig> {
-    let mut cfg = OpenAIConfig::new().with_api_base(base_url.trim_end_matches('/'));
-    if let Some(key) = api_key {
-        cfg = cfg.with_api_key(key.clone());
-    }
-    Client::with_config(cfg)
+pub fn http_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(110)) // under the 120s route timeout
+        .build()
+        .expect("reqwest client")
 }
 
 #[derive(Clone)]
@@ -41,6 +36,32 @@ pub struct Config {
     pub embeddings_model: String,
 }
 
+/// Env var with a fallback default.
+fn env_or(key: &str, default: &str) -> String {
+    std::env::var(key).unwrap_or_else(|_| default.to_string())
+}
+
+/// First set env var out of several aliases, if any.
+fn env_first(keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|k| std::env::var(k).ok())
+}
+
+/// Env var parsed to any FromStr type, falling back to `default` when
+/// missing or unparsable.
+fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+/// Boolean env var: "true" or "1" mean true, anything else (or unset) false.
+fn env_flag(key: &str) -> bool {
+    std::env::var(key)
+        .map(|v| v == "true" || v == "1")
+        .unwrap_or(false)
+}
+
 impl Config {
     pub fn from_env() -> Self {
         let jwt_secret = std::env::var("JWT_SECRET").unwrap_or_else(|_| {
@@ -50,50 +71,28 @@ impl Config {
             rand::thread_rng().fill_bytes(&mut buf);
             hex::encode(buf)
         });
-        let llm_base_url = std::env::var("LLM_BASE_URL")
-            .unwrap_or_else(|_| "https://openrouter.ai/api/v1".into());
-        let llm_api_key = std::env::var("LLM_API_KEY")
-            .or_else(|_| std::env::var("OPENROUTER_API_KEY"))
-            .ok();
+        let llm_base_url = env_or("LLM_BASE_URL", "https://openrouter.ai/api/v1");
+        let llm_api_key = env_first(&["LLM_API_KEY", "OPENROUTER_API_KEY"]);
         Self {
             jwt_secret,
-            access_ttl_minutes: std::env::var("ACCESS_TTL_MINUTES")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(15),
-            refresh_ttl_days: std::env::var("REFRESH_TTL_DAYS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(30),
+            access_ttl_minutes: env_parse("ACCESS_TTL_MINUTES", 15),
+            refresh_ttl_days: env_parse("REFRESH_TTL_DAYS", 30),
             // Set true behind HTTPS in production.
-            cookie_secure: std::env::var("COOKIE_SECURE")
-                .map(|v| v == "true" || v == "1")
-                .unwrap_or(false),
+            cookie_secure: env_flag("COOKIE_SECURE"),
             // Only trust Forwarded/X-Forwarded-For for rate-limit keying when
             // actually behind a proxy that overwrites them; otherwise a
             // direct client could spoof the header to dodge the limit.
-            trust_proxy: std::env::var("TRUST_PROXY")
-                .map(|v| v == "true" || v == "1")
-                .unwrap_or(false),
-            database_url: std::env::var("DATABASE_URL")
-                .unwrap_or_else(|_| "sqlite://rag.db?mode=rwc".into()),
-            bind_addr: std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".into()),
-            llm_model: std::env::var("LLM_MODEL")
-                .or_else(|_| std::env::var("OPENROUTER_MODEL"))
-                .unwrap_or_else(|_| "meta-llama/llama-3.3-70b-instruct".into()),
-            llm_max_tokens: std::env::var("LLM_MAX_TOKENS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1024),
+            trust_proxy: env_flag("TRUST_PROXY"),
+            database_url: env_or("DATABASE_URL", "sqlite://rag.db?mode=rwc"),
+            bind_addr: env_or("BIND_ADDR", "0.0.0.0:3000"),
+            llm_model: env_first(&["LLM_MODEL", "OPENROUTER_MODEL"])
+                .unwrap_or_else(|| "meta-llama/llama-3.3-70b-instruct".into()),
+            llm_max_tokens: env_parse("LLM_MAX_TOKENS", 1024),
             // Default to the same provider as chat; override only if your
-            // chat provider doesn't serve embeddings (e.g. OpenRouter).
-            embeddings_base_url: std::env::var("EMBEDDINGS_BASE_URL")
-                .unwrap_or_else(|_| llm_base_url.clone()),
-            embeddings_api_key: std::env::var("EMBEDDINGS_API_KEY")
-                .ok()
-                .or_else(|| llm_api_key.clone()),
-            embeddings_model: std::env::var("EMBEDDINGS_MODEL")
-                .unwrap_or_else(|_| "text-embedding-3-small".into()),
+            // chat provider doesn't serve embeddings.
+            embeddings_base_url: env_or("EMBEDDINGS_BASE_URL", &llm_base_url),
+            embeddings_api_key: env_first(&["EMBEDDINGS_API_KEY"]).or_else(|| llm_api_key.clone()),
+            embeddings_model: env_or("EMBEDDINGS_MODEL", "text-embedding-3-small"),
             llm_base_url,
             llm_api_key,
         }
