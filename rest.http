@@ -1,0 +1,91 @@
+### Variables — VS Code REST Client (humao.rest-client)
+@baseUrl = http://localhost:3000
+@email = test@example.com
+@password = password123
+
+### Health check
+GET {{baseUrl}}/health
+
+### Register a new user
+# @name register
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### Login
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "{{email}}",
+  "password": "{{password}}"
+}
+
+### Tokens captured from the login response
+@accessToken = {{login.response.body.access_token}}
+@refreshToken = {{login.response.body.refresh_token}}
+
+### Current user
+GET {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+
+### Refresh tokens (rotates the refresh token — old one becomes invalid)
+# @name refresh
+POST {{baseUrl}}/auth/refresh
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refreshToken}}"
+}
+
+### Logout (revokes the refresh token)
+POST {{baseUrl}}/auth/logout
+Content-Type: application/json
+
+{
+  "refresh_token": "{{refreshToken}}"
+}
+
+### Ingest a document
+# @name ingest
+POST {{baseUrl}}/documents
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "title": "Rust Facts",
+  "content": "Rust is a systems programming language that guarantees memory safety without a garbage collector, using an ownership system with borrowing and lifetimes.\n\nThe Rust compiler is called rustc, and the package manager is called Cargo. Packages in Rust are called crates and are published to crates.io.\n\nRust was originally created by Graydon Hoare at Mozilla Research, with the first stable release, Rust 1.0, shipping in May 2015."
+}
+
+### List documents
+GET {{baseUrl}}/documents
+Authorization: Bearer {{accessToken}}
+
+### Delete a document
+@documentId = {{ingest.response.body.id}}
+DELETE {{baseUrl}}/documents/{{documentId}}
+Authorization: Bearer {{accessToken}}
+
+### RAG chat — ask a question about your documents
+POST {{baseUrl}}/chat
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "question": "Who created Rust and when was 1.0 released?"
+}
+
+### RAG chat with custom top_k
+POST {{baseUrl}}/chat
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "question": "What is the Rust package manager called?",
+  "top_k": 3
+}
