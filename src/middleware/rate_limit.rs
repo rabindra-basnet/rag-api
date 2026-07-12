@@ -17,6 +17,7 @@ pub fn rate_limit<S: Clone + Send + Sync + 'static>(
                 $builder
                     .per_second(per_second)
                     .burst_size(burst)
+                    .use_headers()
                     .finish()
                     .expect("valid governor config"),
             );

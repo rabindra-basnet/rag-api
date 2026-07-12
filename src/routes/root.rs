@@ -72,7 +72,12 @@ pub fn routes(state: AppState) -> Router {
 
     let cors = build_cors(&state.cfg.cors_allow_origin, &state.cfg.cors_expose_headers);
 
-    let auth_public = crate::middleware::rate_limit::rate_limit(auth::routes(), 1, 10, trust_proxy);
+    let auth_public = crate::middleware::rate_limit::rate_limit(
+        auth::routes(),
+        state.cfg.auth_rate_per_second,
+        state.cfg.auth_rate_burst,
+        trust_proxy,
+    );
 
     let public = Router::new()
         .route("/health", get(health))
@@ -83,7 +88,12 @@ pub fn routes(state: AppState) -> Router {
         .merge(chat::routes())
         .merge(file::routes())
         .route_layer(from_fn_with_state(state.clone(), require_auth));
-    let protected = crate::middleware::rate_limit::rate_limit(protected, 5, 50, trust_proxy);
+    let protected = crate::middleware::rate_limit::rate_limit(
+        protected,
+        state.cfg.api_rate_per_second,
+        state.cfg.api_rate_burst,
+        trust_proxy,
+    );
 
     public
         .merge(protected)

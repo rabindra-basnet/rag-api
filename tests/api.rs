@@ -81,6 +81,10 @@ async fn test_app() -> Router {
         cors_allow_origin: "*".into(),
         cors_expose_headers: String::new(),
         allowed_file_extensions: ".txt,.md,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp,.gif,.xml,.html".into(),
+        auth_rate_per_second: 1000,
+        auth_rate_burst: 1000,
+        api_rate_per_second: 1000,
+        api_rate_burst: 1000,
         database_url: String::new(),
         bind_addr: String::new(),
         upload_dir: std::env::temp_dir()
