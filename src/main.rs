@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cfg = Config::from_env();
-    let pool = db::init(&cfg.database_url, std::path::Path::new(&cfg.migrations_path)).await?;
+    let pool = db::init(&cfg.database_url).await?;
 
     let state = AppState {
         db: pool,

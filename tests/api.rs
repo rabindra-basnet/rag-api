@@ -63,12 +63,9 @@ async fn spawn_mock_llm() -> String {
 async fn test_app() -> Router {
     let mock_url = spawn_mock_llm().await;
     let db_path = std::env::temp_dir().join(format!("ragtest-{}.db", uuid::Uuid::new_v4()));
-    let pool = rag_backend::db::init(
-        &format!("sqlite://{}?mode=rwc", db_path.display()),
-        std::path::Path::new("./migrations"),
-    )
-    .await
-    .expect("test db");
+    let pool = rag_backend::db::init(&format!("sqlite://{}?mode=rwc", db_path.display()))
+        .await
+        .expect("test db");
 
     let cfg = Config {
         jwt_secret: "integration-test-secret".into(),
@@ -77,7 +74,6 @@ async fn test_app() -> Router {
         cookie_secure: false,
         trust_proxy: false,
         database_url: String::new(),
-        migrations_path: "./migrations".into(),
         bind_addr: String::new(),
         llm_base_url: mock_url.clone(),
         llm_api_key: Some("test-key".into()),
