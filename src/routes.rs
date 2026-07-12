@@ -35,6 +35,11 @@ pub fn router(state: AppState) -> Router {
         .route("/documents/{id}", put(rag::handlers::update_document))
         .route("/documents/{id}", delete(rag::handlers::delete_document))
         .route("/chat", post(rag::handlers::chat))
+        .route("/files", post(crate::files::upload))
+        .route("/files", get(crate::files::list))
+        .route("/files/{id}", get(crate::files::download))
+        .route("/files/{id}/ingest", post(crate::files::ingest))
+        .route("/files/{id}", delete(crate::files::delete))
         .route_layer(from_fn_with_state(
             state.clone(),
             auth::middleware::require_auth,

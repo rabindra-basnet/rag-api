@@ -24,6 +24,7 @@ pub struct Config {
     pub trust_proxy: bool,
     pub database_url: String,
     pub bind_addr: String,
+    pub upload_dir: String,
     // Chat completions (OpenRouter or any OpenAI-compatible API)
     pub llm_base_url: String,
     pub llm_api_key: Option<String>,
@@ -85,6 +86,7 @@ impl Config {
             trust_proxy: env_flag("TRUST_PROXY"),
             database_url: env_or("DATABASE_URL", "sqlite://rag.db?mode=rwc"),
             bind_addr: env_or("BIND_ADDR", "0.0.0.0:3000"),
+            upload_dir: env_or("UPLOAD_DIR", "./uploads"),
             llm_model: env_first(&["LLM_MODEL", "OPENROUTER_MODEL"])
                 .unwrap_or_else(|| "meta-llama/llama-3.3-70b-instruct".into()),
             llm_max_tokens: env_parse("LLM_MAX_TOKENS", 1024),

@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod db;
 pub mod error;
+pub mod files;
 pub mod llm;
 pub mod middleware;
 pub mod models;

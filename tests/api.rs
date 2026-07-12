@@ -75,6 +75,10 @@ async fn test_app() -> Router {
         trust_proxy: false,
         database_url: String::new(),
         bind_addr: String::new(),
+        upload_dir: std::env::temp_dir()
+            .join(format!("ragtest-uploads-{}", uuid::Uuid::new_v4()))
+            .display()
+            .to_string(),
         llm_base_url: mock_url.clone(),
         llm_api_key: Some("test-key".into()),
         llm_model: "mock-model".into(),
@@ -369,6 +373,130 @@ async fn users_cannot_see_each_others_documents() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+fn multipart_request(uri: &str, token: &str, filename: &str, content_type: &str, data: &str) -> Request<Body> {
+    let boundary = "testboundary123";
+    let body = format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n{data}\r\n--{boundary}--\r\n"
+    );
+    Request::builder()
+        .method("POST")
+        .uri(uri)
+        .extension(ConnectInfo("127.0.0.1:9999".parse::<SocketAddr>().unwrap()))
+        .header(header::AUTHORIZATION, format!("Bearer {token}"))
+        .header(header::CONTENT_TYPE, format!("multipart/form-data; boundary={boundary}"))
+        .body(Body::from(body))
+        .unwrap()
+}
+
+#[tokio::test]
+async fn file_upload_download_delete() {
+    let app = test_app().await;
+    let (access, _) = register(&app, "files@test.com").await;
+
+    // Upload without ingestion
+    let resp = app
+        .clone()
+        .oneshot(multipart_request("/files", &access, "notes.txt", "text/plain", "hello file"))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let v = body_json(resp).await;
+    assert_eq!(v["count"], 1);
+    let file_id = v["files"][0]["id"].as_str().unwrap().to_string();
+    assert_eq!(v["files"][0]["document_id"], Value::Null);
+
+    // List shows ingestable/ingested status
+    let resp = app.clone().oneshot(req("GET", "/files", Some(&access), None)).await.unwrap();
+    let listed = body_json(resp).await;
+    assert_eq!(listed["files"].as_array().unwrap().len(), 1);
+    assert_eq!(listed["files"][0]["ingestable"], true);
+    assert_eq!(listed["files"][0]["ingested"], false);
+
+    // Ingest the already-uploaded file, then re-ingest conflicts
+    let resp = app
+        .clone()
+        .oneshot(req("POST", &format!("/files/{file_id}/ingest"), Some(&access), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert_eq!(body_json(resp).await["ingested"], true);
+    let resp = app
+        .clone()
+        .oneshot(req("POST", &format!("/files/{file_id}/ingest"), Some(&access), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::CONFLICT);
+    let resp = app.clone().oneshot(req("GET", "/files", Some(&access), None)).await.unwrap();
+    assert_eq!(body_json(resp).await["files"][0]["ingested"], true);
+
+    // Download round-trips content
+    let resp = app
+        .clone()
+        .oneshot(req("GET", &format!("/files/{file_id}"), Some(&access), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = axum::body::to_bytes(resp.into_body(), 1024 * 1024).await.unwrap();
+    assert_eq!(&bytes[..], b"hello file");
+
+    // Another user can't touch it
+    let (other, _) = register(&app, "other-files@test.com").await;
+    let resp = app
+        .clone()
+        .oneshot(req("GET", &format!("/files/{file_id}"), Some(&other), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+    // Delete
+    let resp = app
+        .clone()
+        .oneshot(req("DELETE", &format!("/files/{file_id}"), Some(&access), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let resp = app
+        .clone()
+        .oneshot(req("GET", &format!("/files/{file_id}"), Some(&access), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn file_upload_with_ingestion() {
+    let app = test_app().await;
+    let (access, _) = register(&app, "ingest-file@test.com").await;
+
+    let resp = app
+        .clone()
+        .oneshot(multipart_request(
+            "/files?ingest=true",
+            &access,
+            "facts.md",
+            "text/markdown",
+            "The speed of light is 299792458 m/s.",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let v = body_json(resp).await;
+    let doc_id = v["files"][0]["document_id"].as_str().expect("ingested doc id").to_string();
+
+    // The ingested document shows up and is chattable.
+    let resp = app.clone().oneshot(req("GET", "/documents", Some(&access), None)).await.unwrap();
+    let docs = body_json(resp).await;
+    assert!(docs["documents"].as_array().unwrap().iter().any(|d| d["id"] == doc_id.as_str()));
+
+    let resp = app
+        .clone()
+        .oneshot(req("POST", "/chat", Some(&access), Some(json!({ "question": "What is the speed of light?" }))))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(!body_json(resp).await["sources"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]

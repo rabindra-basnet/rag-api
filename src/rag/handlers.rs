@@ -95,6 +95,19 @@ async fn ingest_one(
     Ok(json!({ "id": doc_id, "title": title, "chunks": chunks.len() }))
 }
 
+/// Ingest an uploaded text file as a document; returns the document id.
+pub async fn ingest_for_file(
+    state: &AppState,
+    user: &AuthUser,
+    filename: &str,
+    text: &str,
+) -> Result<String, ApiError> {
+    let title = filename.trim();
+    validate_doc(title, text)?;
+    let result = ingest_one(state, user, title, text).await?;
+    Ok(result["id"].as_str().unwrap_or_default().to_string())
+}
+
 async fn insert_chunks(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     doc_id: Uuid,

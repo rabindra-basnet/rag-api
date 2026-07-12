@@ -99,6 +99,35 @@ Authorization: Bearer {{accessToken}}
 DELETE {{baseUrl}}/documents/{{documentId}}
 Authorization: Bearer {{accessToken}}
 
+### Upload a file (multipart; add ?ingest=true to index text files for RAG)
+# @name upload
+POST {{baseUrl}}/files?ingest=true
+Authorization: Bearer {{accessToken}}
+Content-Type: multipart/form-data; boundary=WebAppBoundary
+
+--WebAppBoundary
+Content-Disposition: form-data; name="file"; filename="notes.txt"
+Content-Type: text/plain
+
+Notes uploaded from the frontend. The Golden Gate Bridge opened in 1937.
+--WebAppBoundary--
+
+### List uploaded files (shows ingestable + ingested status per file)
+GET {{baseUrl}}/files
+Authorization: Bearer {{accessToken}}
+
+### Ingest an already-uploaded file into the RAG index
+POST {{baseUrl}}/files/{{upload.response.body.files.0.id}}/ingest
+Authorization: Bearer {{accessToken}}
+
+### Download a file
+GET {{baseUrl}}/files/{{upload.response.body.files.0.id}}
+Authorization: Bearer {{accessToken}}
+
+### Delete a file
+DELETE {{baseUrl}}/files/{{upload.response.body.files.0.id}}
+Authorization: Bearer {{accessToken}}
+
 ### RAG chat — ask a question about your documents
 POST {{baseUrl}}/chat
 Authorization: Bearer {{accessToken}}

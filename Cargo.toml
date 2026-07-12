@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-axum = "0.8"
+axum = { version = "0.8", features = ["multipart"] }
 tokio = { version = "1", features = ["full"] }
 sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "sqlite", "chrono", "uuid"] }
 serde = { version = "1", features = ["derive"] }
@@ -28,6 +28,7 @@ time = "0.3.53"
 validator = { version = "0.20.0", features = ["derive"] }
 tower_governor = "0.8.0"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
+pdf-extract = "0.12.0"
 
 [dev-dependencies]
 http-body-util = "0.1.3"

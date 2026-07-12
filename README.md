@@ -60,6 +60,11 @@ Auth endpoints are public; everything else needs `Authorization: Bearer <access_
 | GET | `/documents` | — | List own documents |
 | DELETE | `/documents/{id}` | — | Delete document + its chunks |
 | POST | `/chat` | `{question, top_k?}` | RAG answer with cited sources |
+| POST | `/files[?ingest=true]` | multipart | Upload files (10 MB each); optionally ingest text/PDF into RAG |
+| GET | `/files` | — | List files with `ingestable` and `ingested` status |
+| POST | `/files/{id}/ingest` | — | Ingest an already-uploaded file (409 if already ingested) |
+| GET | `/files/{id}` | — | Download the original file |
+| DELETE | `/files/{id}` | — | Delete file (blob + record) |
 
 `POST /documents` accepts, by Content-Type (documents up to 10 MB each, max 50 per batch):
 
