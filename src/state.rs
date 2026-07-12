@@ -17,6 +17,8 @@ pub fn http_client() -> reqwest::Client {
 
 #[derive(Clone)]
 pub struct Config {
+    /// "development" or "production".
+    pub environment: String,
     pub jwt_secret: String,
     /// Separate signing key for refresh JWTs: a leaked/cracked access-token
     /// key can never forge refresh tokens, and vice versa.
@@ -33,8 +35,8 @@ pub struct Config {
     pub llm_api_key: Option<String>,
     pub llm_model: String,
     pub llm_max_tokens: u32,
-    /// Vision-capable model used for image OCR (defaults to llm_model).
-    pub vision_model: String,
+    /// Directory holding the ocrs .rten model files for local image OCR.
+    pub ocr_models_dir: String,
     // Embeddings (OpenRouter doesn't serve embeddings, so this can point elsewhere,
     // e.g. OpenAI, Together, Jina, or a local server like Ollama/llama.cpp)
     pub embeddings_base_url: String,
@@ -61,11 +63,11 @@ fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
         .unwrap_or(default)
 }
 
-/// Boolean env var: "true" or "1" mean true, anything else (or unset) false.
-fn env_flag(key: &str) -> bool {
+/// Boolean env var: "true"/"1" -> true, anything else -> false, unset -> default.
+fn env_flag(key: &str, default: bool) -> bool {
     std::env::var(key)
         .map(|v| v == "true" || v == "1")
-        .unwrap_or(false)
+        .unwrap_or(default)
 }
 
 impl Config {
@@ -81,29 +83,31 @@ impl Config {
         // so the two key spaces are still distinct.
         let refresh_jwt_secret = std::env::var("REFRESH_JWT_SECRET").unwrap_or_else(|_| {
             use sha2::{Digest, Sha256};
-            hex::encode(Sha256::digest(format!("{jwt_secret}:refresh-v1").as_bytes()))
+            hex::encode(Sha256::digest(
+                format!("{jwt_secret}:refresh-v1").as_bytes(),
+            ))
         });
         let llm_base_url = env_or("LLM_BASE_URL", "https://openrouter.ai/api/v1");
         let llm_api_key = env_first(&["LLM_API_KEY", "OPENROUTER_API_KEY"]);
         Self {
+            environment: env_or("ENVIRONMENT", "development"),
             jwt_secret,
             refresh_jwt_secret,
             access_ttl_minutes: env_parse("ACCESS_TTL_MINUTES", 15),
             refresh_ttl_days: env_parse("REFRESH_TTL_DAYS", 30),
-            // Set true behind HTTPS in production.
-            cookie_secure: env_flag("COOKIE_SECURE"),
+            // Secure by default; set COOKIE_SECURE=false for plain-http dev.
+            cookie_secure: env_flag("COOKIE_SECURE", true),
             // Only trust Forwarded/X-Forwarded-For for rate-limit keying when
             // actually behind a proxy that overwrites them; otherwise a
             // direct client could spoof the header to dodge the limit.
-            trust_proxy: env_flag("TRUST_PROXY"),
+            trust_proxy: env_flag("TRUST_PROXY", false),
             database_url: env_or("DATABASE_URL", "sqlite://rag.db?mode=rwc"),
             bind_addr: env_or("BIND_ADDR", "0.0.0.0:3000"),
             upload_dir: env_or("UPLOAD_DIR", "./uploads"),
             llm_model: env_first(&["LLM_MODEL", "OPENROUTER_MODEL"])
                 .unwrap_or_else(|| "meta-llama/llama-3.3-70b-instruct".into()),
             llm_max_tokens: env_parse("LLM_MAX_TOKENS", 1024),
-            vision_model: env_first(&["VISION_MODEL", "LLM_MODEL", "OPENROUTER_MODEL"])
-                .unwrap_or_else(|| "meta-llama/llama-3.3-70b-instruct".into()),
+            ocr_models_dir: env_or("OCR_MODELS_DIR", "./models"),
             // Default to the same provider as chat; override only if your
             // chat provider doesn't serve embeddings.
             embeddings_base_url: env_or("EMBEDDINGS_BASE_URL", &llm_base_url),

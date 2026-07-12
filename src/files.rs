@@ -89,8 +89,14 @@ async fn extract_text(
         let text = text.trim().to_string();
         return Ok((!text.is_empty()).then_some(text));
     }
-    if let Some(mime) = image_mime(content_type, filename) {
-        let text = crate::llm::image_to_text(state, mime, data).await?;
+    if image_mime(content_type, filename).is_some() {
+        // Local OCR (pure-Rust ocrs engine) — CPU-bound, keep off async workers.
+        let models_dir = state.cfg.ocr_models_dir.clone();
+        let bytes = data.to_vec();
+        let text =
+            tokio::task::spawn_blocking(move || crate::ocr::extract_text(&models_dir, &bytes))
+                .await
+                .map_err(|e| ApiError::Internal(format!("ocr task: {e}")))??;
         return Ok(Some(text));
     }
     Ok(None)

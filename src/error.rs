@@ -2,6 +2,19 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use serde_json::json;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// Development mode: internal error details are returned to the client
+/// instead of a generic message. Set once at startup from ENVIRONMENT.
+static DEV_MODE: AtomicBool = AtomicBool::new(false);
+
+pub fn set_dev_mode(enabled: bool) {
+    DEV_MODE.store(enabled, Ordering::Relaxed);
+}
+
+pub fn dev_mode() -> bool {
+    DEV_MODE.load(Ordering::Relaxed)
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ApiError {
@@ -44,9 +57,15 @@ impl IntoResponse for ApiError {
             ApiError::Unauthorized => (StatusCode::UNAUTHORIZED, "unauthorized".into()),
             ApiError::NotFound => (StatusCode::NOT_FOUND, "not found".into()),
             ApiError::Conflict(m) => (StatusCode::CONFLICT, m.clone()),
-            ApiError::Internal(_) => (
+            // Production: generic message, detail only in server logs.
+            // Development: the real error goes back to the client.
+            ApiError::Internal(detail) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "internal server error".into(),
+                if dev_mode() {
+                    detail.clone()
+                } else {
+                    "internal server error".into()
+                },
             ),
         };
         (status, Json(json!({ "error": msg }))).into_response()

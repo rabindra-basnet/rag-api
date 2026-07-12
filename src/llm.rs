@@ -96,54 +96,6 @@ pub async fn chat_completion(
         .ok_or_else(|| ApiError::Internal("llm returned no content".into()))
 }
 
-/// OCR an image with a vision-capable model: the image is sent inline as a
-/// base64 data URL in the OpenAI-compatible multimodal message format.
-pub async fn image_to_text(
-    state: &AppState,
-    mime: &str,
-    image: &[u8],
-) -> Result<String, ApiError> {
-    use base64::Engine;
-    let data_url = format!(
-        "data:{mime};base64,{}",
-        base64::engine::general_purpose::STANDARD.encode(image)
-    );
-
-    let parsed: ChatResponse = post_json(
-        state,
-        &state.cfg.llm_base_url,
-        &state.cfg.llm_api_key,
-        "/chat/completions",
-        json!({
-            "model": state.cfg.vision_model,
-            "max_tokens": state.cfg.llm_max_tokens,
-            "messages": [{
-                "role": "user",
-                "content": [
-                    { "type": "text",
-                      "text": "Transcribe ALL text visible in this image, preserving reading order and structure. Output only the transcribed text, no commentary. If the image contains no text, output exactly: NO_TEXT" },
-                    { "type": "image_url", "image_url": { "url": data_url } }
-                ]
-            }],
-        }),
-        "image ocr",
-    )
-    .await?;
-
-    let text = parsed
-        .choices
-        .into_iter()
-        .next()
-        .and_then(|c| c.message.content)
-        .ok_or_else(|| ApiError::Internal("vision model returned no content".into()))?;
-
-    let text = text.trim().to_string();
-    if text == "NO_TEXT" || text.is_empty() {
-        return Err(ApiError::BadRequest("no text found in image".into()));
-    }
-    Ok(text)
-}
-
 /// Batch-embed texts via an OpenAI-compatible /embeddings endpoint.
 pub async fn embed(state: &AppState, texts: &[String]) -> Result<Vec<Vec<f32>>, ApiError> {
     let parsed: EmbeddingsResponse = post_json(

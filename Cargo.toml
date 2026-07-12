@@ -29,7 +29,9 @@ validator = { version = "0.20.0", features = ["derive"] }
 tower_governor = "0.8.0"
 reqwest = { version = "0.13.4", default-features = false, features = ["json", "rustls"] }
 pdf-extract = "0.12.0"
-base64 = "0.22.1"
+ocrs = "0.12.2"
+image = "0.25.10"
+rten = "0.24.0"
 
 [dev-dependencies]
 http-body-util = "0.1.3"

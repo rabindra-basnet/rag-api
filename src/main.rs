@@ -5,14 +5,34 @@ use rag_backend::{db, routes};
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
 
-    tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "rag_backend=debug,tower_http=info".into()),
-        )
-        .init();
-
     let cfg = Config::from_env();
+    let dev = cfg.environment == "development";
+    rag_backend::error::set_dev_mode(dev);
+    if dev && std::env::var("RUST_BACKTRACE").is_err() {
+        // Full tracebacks on panics during development.
+        std::env::set_var("RUST_BACKTRACE", "1");
+    }
+
+    // Development: verbose, human-readable logs with file:line. Production:
+    // compact info-level (override either with RUST_LOG).
+    let default_filter = if dev {
+        "rag_backend=trace,tower_http=debug,sqlx=debug"
+    } else {
+        "rag_backend=info,tower_http=info"
+    };
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| default_filter.into());
+    if dev {
+        tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .pretty()
+            .with_file(true)
+            .with_line_number(true)
+            .init();
+    } else {
+        tracing_subscriber::fmt().with_env_filter(filter).init();
+    }
+    tracing::info!(environment = cfg.environment, "starting");
     let pool = db::init(&cfg.database_url).await?;
 
     let state = AppState {

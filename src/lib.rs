@@ -5,6 +5,7 @@ pub mod files;
 pub mod llm;
 pub mod middleware;
 pub mod models;
+pub mod ocr;
 pub mod rag;
 pub mod routes;
 pub mod state;
