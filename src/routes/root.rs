@@ -95,8 +95,10 @@ pub fn routes(state: AppState) -> Router {
         trust_proxy,
     );
 
-    public
-        .merge(protected)
+    let api = public.merge(protected);
+
+    Router::new()
+        .nest("/api/v1", api)
         .with_state(state)
         .layer(CatchPanicLayer::new())
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))

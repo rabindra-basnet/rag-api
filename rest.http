@@ -4,13 +4,13 @@
 @password = password123
 
 ### Health check
-GET {{baseUrl}}/health
+GET {{baseUrl}}/api/v1/health
 
 ### Register a new user
 ### Returns tokens + the user profile when SIGNUP_LOGIN=true (the default),
 ### or just the user profile when SIGNUP_LOGIN=false.
 # @name register
-POST {{baseUrl}}/auth/register
+POST {{baseUrl}}/api/v1/auth/register
 Content-Type: application/json
 
 {
@@ -22,7 +22,7 @@ Content-Type: application/json
 
 ### Login
 # @name login
-POST {{baseUrl}}/auth/login
+POST {{baseUrl}}/api/v1/auth/login
 Content-Type: application/json
 
 {
@@ -38,11 +38,11 @@ Content-Type: application/json
 ### Current user — GET /auth/me returns { "user": { ...profile } }
 ### Access token may be sent via the Authorization header (below) or the
 ### `access_token` cookie that login/register/refresh set on the browser.
-GET {{baseUrl}}/auth/me
+GET {{baseUrl}}/api/v1/auth/me
 Authorization: Bearer {{accessToken}}
 
 ### Update the current user's profile (name / username)
-PUT {{baseUrl}}/auth/me
+PUT {{baseUrl}}/api/v1/auth/me
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -55,17 +55,17 @@ Content-Type: application/json
 ### Uses the `refresh_token` cookie (sent automatically). Issues a new
 ### access_token (returned in the body) and rotates the refresh cookie.
 # @name refresh
-POST {{baseUrl}}/auth/refresh
+POST {{baseUrl}}/api/v1/auth/refresh
 
 ### Logout — POST /auth/logout
 ### Sends the access token so the server can revoke it (jti denylist);
 ### also clears the access_token and refresh_token cookies.
-POST {{baseUrl}}/auth/logout
+POST {{baseUrl}}/api/v1/auth/logout
 Authorization: Bearer {{accessToken}}
 
 ### Ingest a single document (JSON)
 # @name ingest
-POST {{baseUrl}}/documents
+POST {{baseUrl}}/api/v1/documents
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -75,7 +75,7 @@ Content-Type: application/json
 }
 
 ### Ingest multiple documents at once (JSON array)
-POST {{baseUrl}}/documents
+POST {{baseUrl}}/api/v1/documents
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -85,14 +85,14 @@ Content-Type: application/json
 ]
 
 ### Ingest raw text (title via query param; up to 10 MB per document)
-POST {{baseUrl}}/documents?title=Plain%20Doc
+POST {{baseUrl}}/api/v1/documents?title=Plain%20Doc
 Authorization: Bearer {{accessToken}}
 Content-Type: text/plain
 
 Axum is a Rust web framework built on tokio and tower.
 
 ### Update a document (re-chunks and re-embeds atomically)
-PUT {{baseUrl}}/documents/{{ingest.response.body.id}}
+PUT {{baseUrl}}/api/v1/documents/{{ingest.response.body.id}}
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -102,17 +102,17 @@ Content-Type: application/json
 }
 
 ### List documents
-GET {{baseUrl}}/documents
+GET {{baseUrl}}/api/v1/documents
 Authorization: Bearer {{accessToken}}
 
 ### Delete a document
 @documentId = {{ingest.response.body.id}}
-DELETE {{baseUrl}}/documents/{{documentId}}
+DELETE {{baseUrl}}/api/v1/documents/{{documentId}}
 Authorization: Bearer {{accessToken}}
 
 ### Upload a file (multipart; add ?ingest=true to index text files for RAG)
 # @name upload
-POST {{baseUrl}}/files?ingest=true
+POST {{baseUrl}}/api/v1/files?ingest=true
 Authorization: Bearer {{accessToken}}
 Content-Type: multipart/form-data; boundary=WebAppBoundary
 
@@ -124,23 +124,23 @@ Notes uploaded from the frontend. The Golden Gate Bridge opened in 1937.
 --WebAppBoundary--
 
 ### List uploaded files (shows ingestable + ingested status per file)
-GET {{baseUrl}}/files
+GET {{baseUrl}}/api/v1/files
 Authorization: Bearer {{accessToken}}
 
 ### Ingest an already-uploaded file into the RAG index
-POST {{baseUrl}}/files/{{upload.response.body.files.0.id}}/ingest
+POST {{baseUrl}}/api/v1/files/{{upload.response.body.files.0.id}}/ingest
 Authorization: Bearer {{accessToken}}
 
 ### Download a file
-GET {{baseUrl}}/files/{{upload.response.body.files.0.id}}
+GET {{baseUrl}}/api/v1/files/{{upload.response.body.files.0.id}}
 Authorization: Bearer {{accessToken}}
 
 ### Delete a file
-DELETE {{baseUrl}}/files/{{upload.response.body.files.0.id}}
+DELETE {{baseUrl}}/api/v1/files/{{upload.response.body.files.0.id}}
 Authorization: Bearer {{accessToken}}
 
 ### RAG chat — ask a question about your documents
-POST {{baseUrl}}/chat
+POST {{baseUrl}}/api/v1/chat
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 
@@ -149,7 +149,7 @@ Content-Type: application/json
 }
 
 ### RAG chat with custom top_k
-POST {{baseUrl}}/chat
+POST {{baseUrl}}/api/v1/chat
 Authorization: Bearer {{accessToken}}
 Content-Type: application/json
 

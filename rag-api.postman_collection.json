@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "1f2c3d4e-5a6b-7c8d-9e0f-a1b2c3d4e5f6",
     "name": "RAG API",
-    "description": "Collection for the Rust/Axum RAG backend.\n\nAuth model:\n- register/login return { access_token, user } and set two HttpOnly cookies: `access_token` (15m) and `refresh_token` (30d).\n- Protected routes accept `Authorization: Bearer <access_token>` OR the `access_token` cookie.\n- /auth/refresh reads the `refresh_token` cookie, issues a new access token and rotates the refresh cookie.\n- /auth/logout revokes the token server-side (jti denylist) and clears both cookies.\n\nPostman auto-saves cookies, so /auth/refresh works without manually copying the refresh token.",
+    "description": "Collection for the Rust/Axum RAG backend (API v1).\n\nAuth model:\n- register/login return { access_token, user } and set two HttpOnly cookies: `access_token` (15m) and `refresh_token` (30d).\n- Protected routes accept `Authorization: Bearer <access_token>` OR the `access_token` cookie.\n- /api/v1/auth/refresh reads the `refresh_token` cookie, issues a new access token and rotates the refresh cookie.\n- /api/v1/auth/logout revokes the token server-side (jti denylist) and clears both cookies.\n\nPostman auto-saves cookies, so /api/v1/auth/refresh works without manually copying the refresh token.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -20,7 +20,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/health", "host": ["{{baseUrl}}"], "path": ["health"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/health", "host": ["{{baseUrl}}"], "path": ["api", "v1", "health"] }
           }
         },
         {
@@ -45,7 +45,7 @@
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"name\": \"Test User\",\n  \"username\": \"testuser\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/auth/register", "host": ["{{baseUrl}}"], "path": ["auth", "register"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/register", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "register"] }
           }
         },
         {
@@ -70,7 +70,7 @@
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/auth/login", "host": ["{{baseUrl}}"], "path": ["auth", "login"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/login", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "login"] }
           }
         },
         {
@@ -78,7 +78,7 @@
           "request": {
             "method": "GET",
             "header": [ { "key": "Authorization", "value": "Bearer {{accessToken}}" } ],
-            "url": { "raw": "{{baseUrl}}/auth/me", "host": ["{{baseUrl}}"], "path": ["auth", "me"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "me"] }
           }
         },
         {
@@ -93,7 +93,7 @@
               "mode": "raw",
               "raw": "{\n  \"name\": \"Test User Updated\",\n  \"username\": \"testuser2\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/auth/me", "host": ["{{baseUrl}}"], "path": ["auth", "me"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/me", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "me"] }
           }
         },
         {
@@ -114,7 +114,7 @@
           "request": {
             "method": "POST",
             "header": [],
-            "url": { "raw": "{{baseUrl}}/auth/refresh", "host": ["{{baseUrl}}"], "path": ["auth", "refresh"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/refresh", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "refresh"] }
           }
         },
         {
@@ -122,7 +122,7 @@
           "request": {
             "method": "POST",
             "header": [ { "key": "Authorization", "value": "Bearer {{accessToken}}" } ],
-            "url": { "raw": "{{baseUrl}}/auth/logout", "host": ["{{baseUrl}}"], "path": ["auth", "logout"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/auth/logout", "host": ["{{baseUrl}}"], "path": ["api", "v1", "auth", "logout"] }
           }
         }
       ]
@@ -155,7 +155,7 @@
               "mode": "raw",
               "raw": "{\n  \"title\": \"Rust Facts\",\n  \"content\": \"Rust is a systems programming language that guarantees memory safety without a garbage collector, using an ownership system with borrowing and lifetimes.\\n\\nThe Rust compiler is called rustc, and the package manager is called Cargo. Packages in Rust are called crates and are published to crates.io.\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/documents", "host": ["{{baseUrl}}"], "path": ["documents"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/documents", "host": ["{{baseUrl}}"], "path": ["api", "v1", "documents"] }
           }
         },
         {
@@ -170,7 +170,7 @@
               "mode": "raw",
               "raw": "[\n  { \"title\": \"Doc A\", \"content\": \"The capital of France is Paris.\" },\n  { \"title\": \"Doc B\", \"content\": \"Water boils at 100 degrees Celsius at sea level.\" }\n]"
             },
-            "url": { "raw": "{{baseUrl}}/documents", "host": ["{{baseUrl}}"], "path": ["documents"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/documents", "host": ["{{baseUrl}}"], "path": ["api", "v1", "documents"] }
           }
         },
         {
@@ -183,9 +183,9 @@
             ],
             "body": { "mode": "raw", "raw": "Axum is a Rust web framework built on tokio and tower." },
             "url": {
-              "raw": "{{baseUrl}}/documents?title=Plain%20Doc",
+              "raw": "{{baseUrl}}/api/v1/documents?title=Plain%20Doc",
               "host": ["{{baseUrl}}"],
-              "path": ["documents"],
+              "path": ["api", "v1", "documents"],
               "query": [ { "key": "title", "value": "Plain Doc" } ]
             }
           }
@@ -202,7 +202,7 @@
               "mode": "raw",
               "raw": "{\n  \"title\": \"Rust Facts v2\",\n  \"content\": \"Rust 1.0 shipped in May 2015. The 2024 edition is the latest edition.\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/documents/{{documentId}}", "host": ["{{baseUrl}}"], "path": ["documents", "{{documentId}}"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/documents/{{documentId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "documents", "{{documentId}}"] }
           }
         },
         {
@@ -210,7 +210,7 @@
           "request": {
             "method": "GET",
             "header": [ { "key": "Authorization", "value": "Bearer {{accessToken}}" } ],
-            "url": { "raw": "{{baseUrl}}/documents", "host": ["{{baseUrl}}"], "path": ["documents"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/documents", "host": ["{{baseUrl}}"], "path": ["api", "v1", "documents"] }
           }
         },
         {
@@ -218,7 +218,7 @@
           "request": {
             "method": "DELETE",
             "header": [ { "key": "Authorization", "value": "Bearer {{accessToken}}" } ],
-            "url": { "raw": "{{baseUrl}}/documents/{{documentId}}", "host": ["{{baseUrl}}"], "path": ["documents", "{{documentId}}"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/documents/{{documentId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "documents", "{{documentId}}"] }
           }
         }
       ]
@@ -252,9 +252,9 @@
               "raw": "--WebAppBoundary\r\nContent-Disposition: form-data; name=\"file\"; filename=\"notes.txt\"\r\nContent-Type: text/plain\r\n\r\nNotes uploaded from the frontend. The Golden Gate Bridge opened in 1937.\r\n--WebAppBoundary--"
             },
             "url": {
-              "raw": "{{baseUrl}}/files?ingest=true",
+              "raw": "{{baseUrl}}/api/v1/files?ingest=true",
               "host": ["{{baseUrl}}"],
-              "path": ["files"],
+              "path": ["api", "v1", "files"],
               "query": [ { "key": "ingest", "value": "true" } ]
             }
           }
@@ -264,7 +264,7 @@
           "request": {
             "method": "GET",
             "header": [ { "key": "Authorization", "value": "Bearer {{accessToken}}" } ],
-            "url": { "raw": "{{baseUrl}}/files", "host": ["{{baseUrl}}"], "path": ["files"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/files", "host": ["{{baseUrl}}"], "path": ["api", "v1", "files"] }
           }
         },
         {
@@ -272,7 +272,7 @@
           "request": {
             "method": "POST",
             "header": [ { "key": "Authorization", "value": "Bearer {{accessToken}}" } ],
-            "url": { "raw": "{{baseUrl}}/files/{{fileId}}/ingest", "host": ["{{baseUrl}}"], "path": ["files", "{{fileId}}", "ingest"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/files/{{fileId}}/ingest", "host": ["{{baseUrl}}"], "path": ["api", "v1", "files", "{{fileId}}", "ingest"] }
           }
         },
         {
@@ -280,7 +280,7 @@
           "request": {
             "method": "GET",
             "header": [ { "key": "Authorization", "value": "Bearer {{accessToken}}" } ],
-            "url": { "raw": "{{baseUrl}}/files/{{fileId}}", "host": ["{{baseUrl}}"], "path": ["files", "{{fileId}}"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/files/{{fileId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "files", "{{fileId}}"] }
           }
         },
         {
@@ -288,7 +288,7 @@
           "request": {
             "method": "DELETE",
             "header": [ { "key": "Authorization", "value": "Bearer {{accessToken}}" } ],
-            "url": { "raw": "{{baseUrl}}/files/{{fileId}}", "host": ["{{baseUrl}}"], "path": ["files", "{{fileId}}"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/files/{{fileId}}", "host": ["{{baseUrl}}"], "path": ["api", "v1", "files", "{{fileId}}"] }
           }
         }
       ]
@@ -308,7 +308,7 @@
               "mode": "raw",
               "raw": "{\n  \"question\": \"Who created Rust and when was 1.0 released?\"\n}"
             },
-            "url": { "raw": "{{baseUrl}}/chat", "host": ["{{baseUrl}}"], "path": ["chat"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/chat", "host": ["{{baseUrl}}"], "path": ["api", "v1", "chat"] }
           }
         },
         {
@@ -323,7 +323,7 @@
               "mode": "raw",
               "raw": "{\n  \"question\": \"What is the Rust package manager called?\",\n  \"top_k\": 3\n}"
             },
-            "url": { "raw": "{{baseUrl}}/chat", "host": ["{{baseUrl}}"], "path": ["chat"] }
+            "url": { "raw": "{{baseUrl}}/api/v1/chat", "host": ["{{baseUrl}}"], "path": ["api", "v1", "chat"] }
           }
         }
       ]

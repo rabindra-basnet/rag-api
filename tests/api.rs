@@ -156,7 +156,7 @@ async fn register(app: &Router, email: &str) -> (String, HashMap<String, String>
         .clone()
         .oneshot(req(
             "POST",
-            "/auth/register",
+            "/api/v1/auth/register",
             None,
             Some(json!({ "email": email, "password": "password123" })),
         ))
@@ -178,7 +178,7 @@ async fn refresh_with_cookies(
     let cookie = cookie_header(cookies);
     let mut b = Request::builder()
         .method("POST")
-        .uri("/auth/refresh")
+        .uri("/api/v1/auth/refresh")
         .extension(ConnectInfo("127.0.0.1:9999".parse::<SocketAddr>().unwrap()));
     if !cookie.is_empty() {
         b = b.header(header::COOKIE, HeaderValue::from_str(&cookie).unwrap());
@@ -197,7 +197,7 @@ async fn refresh_with_cookies(
 #[tokio::test]
 async fn health_works() {
     let app = test_app().await;
-    let resp = app.oneshot(req("GET", "/health", None, None)).await.unwrap();
+    let resp = app.oneshot(req("GET", "/api/v1/health", None, None)).await.unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
 }
 
@@ -208,7 +208,7 @@ async fn register_login_me_flow() {
 
     let resp = app
         .clone()
-        .oneshot(req("GET", "/auth/me", Some(&access), None))
+        .oneshot(req("GET", "/api/v1/auth/me", Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -219,7 +219,7 @@ async fn register_login_me_flow() {
         .clone()
         .oneshot(req(
             "POST",
-            "/auth/login",
+            "/api/v1/auth/login",
             None,
             Some(json!({ "email": "a@test.com", "password": "wrongpass1" })),
         ))
@@ -232,7 +232,7 @@ async fn register_login_me_flow() {
         .clone()
         .oneshot(req(
             "POST",
-            "/auth/register",
+            "/api/v1/auth/register",
             None,
             Some(json!({ "email": "a@test.com", "password": "password123" })),
         ))
@@ -245,8 +245,8 @@ async fn register_login_me_flow() {
 async fn validation_rejects_bad_input() {
     let app = test_app().await;
     for (uri, body) in [
-        ("/auth/register", json!({ "email": "not-an-email", "password": "password123" })),
-        ("/auth/register", json!({ "email": "b@test.com", "password": "short" })),
+        ("/api/v1/auth/register", json!({ "email": "not-an-email", "password": "password123" })),
+        ("/api/v1/auth/register", json!({ "email": "b@test.com", "password": "short" })),
     ] {
         let resp = app.clone().oneshot(req("POST", uri, None, Some(body))).await.unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -261,7 +261,7 @@ async fn logout_invalidates_access_token() {
     // Token works before logout.
     let resp = app
         .clone()
-        .oneshot(req("GET", "/auth/me", Some(&access), None))
+        .oneshot(req("GET", "/api/v1/auth/me", Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -269,7 +269,7 @@ async fn logout_invalidates_access_token() {
     // Logout with the access token.
     let resp = app
         .clone()
-        .oneshot(req("POST", "/auth/logout", Some(&access), None))
+        .oneshot(req("POST", "/api/v1/auth/logout", Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -277,7 +277,7 @@ async fn logout_invalidates_access_token() {
     // The same access token must now be rejected (revoked jti).
     let resp = app
         .clone()
-        .oneshot(req("GET", "/auth/me", Some(&access), None))
+        .oneshot(req("GET", "/api/v1/auth/me", Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -301,7 +301,7 @@ async fn refresh_issues_new_access_token() {
     // The new access token works on a protected route.
     let resp = app
         .clone()
-        .oneshot(req("GET", "/auth/me", Some(new_access), None))
+        .oneshot(req("GET", "/api/v1/auth/me", Some(new_access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -314,14 +314,14 @@ async fn refresh_issues_new_access_token() {
 #[tokio::test]
 async fn protected_routes_require_auth() {
     let app = test_app().await;
-    for (method, uri) in [("GET", "/documents"), ("POST", "/chat"), ("GET", "/auth/me")] {
+    for (method, uri) in [("GET", "/api/v1/documents"), ("POST", "/api/v1/chat"), ("GET", "/api/v1/auth/me")] {
         let resp = app.clone().oneshot(req(method, uri, None, None)).await.unwrap();
         assert_eq!(resp.status(), StatusCode::UNAUTHORIZED, "{method} {uri}");
     }
     // Garbage token
     let resp = app
         .clone()
-        .oneshot(req("GET", "/auth/me", Some("garbage"), None))
+        .oneshot(req("GET", "/api/v1/auth/me", Some("garbage"), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
@@ -337,7 +337,7 @@ async fn document_crud_and_rag_chat() {
         .clone()
         .oneshot(req(
             "POST",
-            "/documents",
+            "/api/v1/documents",
             Some(&access),
             Some(json!({ "title": "Capitals", "content": "The capital of Japan is Tokyo." })),
         ))
@@ -353,7 +353,7 @@ async fn document_crud_and_rag_chat() {
         .clone()
         .oneshot(req(
             "POST",
-            "/documents",
+            "/api/v1/documents",
             Some(&access),
             Some(json!([
                 { "title": "Doc A", "content": "Water boils at 100C." },
@@ -368,7 +368,7 @@ async fn document_crud_and_rag_chat() {
     // List
     let resp = app
         .clone()
-        .oneshot(req("GET", "/documents", Some(&access), None))
+        .oneshot(req("GET", "/api/v1/documents", Some(&access), None))
         .await
         .unwrap();
     assert_eq!(body_json(resp).await["documents"].as_array().unwrap().len(), 3);
@@ -378,7 +378,7 @@ async fn document_crud_and_rag_chat() {
         .clone()
         .oneshot(req(
             "PUT",
-            &format!("/documents/{doc_id}"),
+            &format!("/api/v1/documents/{doc_id}"),
             Some(&access),
             Some(json!({ "title": "Capitals v2", "content": "The capital of France is Paris." })),
         ))
@@ -391,7 +391,7 @@ async fn document_crud_and_rag_chat() {
         .clone()
         .oneshot(req(
             "POST",
-            "/chat",
+            "/api/v1/chat",
             Some(&access),
             Some(json!({ "question": "What is the capital of France?" })),
         ))
@@ -405,13 +405,13 @@ async fn document_crud_and_rag_chat() {
     // Delete
     let resp = app
         .clone()
-        .oneshot(req("DELETE", &format!("/documents/{doc_id}"), Some(&access), None))
+        .oneshot(req("DELETE", &format!("/api/v1/documents/{doc_id}"), Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let resp = app
         .clone()
-        .oneshot(req("DELETE", &format!("/documents/{doc_id}"), Some(&access), None))
+        .oneshot(req("DELETE", &format!("/api/v1/documents/{doc_id}"), Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -427,7 +427,7 @@ async fn users_cannot_see_each_others_documents() {
         .clone()
         .oneshot(req(
             "POST",
-            "/documents",
+            "/api/v1/documents",
             Some(&alice),
             Some(json!({ "title": "Secret", "content": "Alice's private notes." })),
         ))
@@ -438,14 +438,14 @@ async fn users_cannot_see_each_others_documents() {
     // Bob sees an empty list and can't delete or update Alice's doc.
     let resp = app
         .clone()
-        .oneshot(req("GET", "/documents", Some(&bob), None))
+        .oneshot(req("GET", "/api/v1/documents", Some(&bob), None))
         .await
         .unwrap();
     assert!(body_json(resp).await["documents"].as_array().unwrap().is_empty());
 
     let resp = app
         .clone()
-        .oneshot(req("DELETE", &format!("/documents/{doc_id}"), Some(&bob), None))
+        .oneshot(req("DELETE", &format!("/api/v1/documents/{doc_id}"), Some(&bob), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -454,7 +454,7 @@ async fn users_cannot_see_each_others_documents() {
         .clone()
         .oneshot(req(
             "PUT",
-            &format!("/documents/{doc_id}"),
+            &format!("/api/v1/documents/{doc_id}"),
             Some(&bob),
             Some(json!({ "title": "Hijack", "content": "gotcha" })),
         ))
@@ -486,7 +486,7 @@ async fn file_upload_download_delete() {
     // Upload without ingestion
     let resp = app
         .clone()
-        .oneshot(multipart_request("/files", &access, "notes.txt", "text/plain", "hello file"))
+        .oneshot(multipart_request("/api/v1/files", &access, "notes.txt", "text/plain", "hello file"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -496,7 +496,7 @@ async fn file_upload_download_delete() {
     assert_eq!(v["files"][0]["document_id"], Value::Null);
 
     // List shows ingestable/ingested status
-    let resp = app.clone().oneshot(req("GET", "/files", Some(&access), None)).await.unwrap();
+    let resp = app.clone().oneshot(req("GET", "/api/v1/files", Some(&access), None)).await.unwrap();
     let listed = body_json(resp).await;
     assert_eq!(listed["files"].as_array().unwrap().len(), 1);
     assert_eq!(listed["files"][0]["ingestable"], true);
@@ -505,24 +505,24 @@ async fn file_upload_download_delete() {
     // Ingest the already-uploaded file, then re-ingest conflicts
     let resp = app
         .clone()
-        .oneshot(req("POST", &format!("/files/{file_id}/ingest"), Some(&access), None))
+        .oneshot(req("POST", &format!("/api/v1/files/{file_id}/ingest"), Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert_eq!(body_json(resp).await["ingested"], true);
     let resp = app
         .clone()
-        .oneshot(req("POST", &format!("/files/{file_id}/ingest"), Some(&access), None))
+        .oneshot(req("POST", &format!("/api/v1/files/{file_id}/ingest"), Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::CONFLICT);
-    let resp = app.clone().oneshot(req("GET", "/files", Some(&access), None)).await.unwrap();
+    let resp = app.clone().oneshot(req("GET", "/api/v1/files", Some(&access), None)).await.unwrap();
     assert_eq!(body_json(resp).await["files"][0]["ingested"], true);
 
     // Download round-trips content
     let resp = app
         .clone()
-        .oneshot(req("GET", &format!("/files/{file_id}"), Some(&access), None))
+        .oneshot(req("GET", &format!("/api/v1/files/{file_id}"), Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -533,7 +533,7 @@ async fn file_upload_download_delete() {
     let (other, _) = register(&app, "other-files@test.com").await;
     let resp = app
         .clone()
-        .oneshot(req("GET", &format!("/files/{file_id}"), Some(&other), None))
+        .oneshot(req("GET", &format!("/api/v1/files/{file_id}"), Some(&other), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -541,13 +541,13 @@ async fn file_upload_download_delete() {
     // Delete
     let resp = app
         .clone()
-        .oneshot(req("DELETE", &format!("/files/{file_id}"), Some(&access), None))
+        .oneshot(req("DELETE", &format!("/api/v1/files/{file_id}"), Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let resp = app
         .clone()
-        .oneshot(req("GET", &format!("/files/{file_id}"), Some(&access), None))
+        .oneshot(req("GET", &format!("/api/v1/files/{file_id}"), Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::NOT_FOUND);
@@ -561,7 +561,7 @@ async fn file_upload_with_ingestion() {
     let resp = app
         .clone()
         .oneshot(multipart_request(
-            "/files?ingest=true",
+            "/api/v1/files?ingest=true",
             &access,
             "facts.md",
             "text/markdown",
@@ -574,13 +574,13 @@ async fn file_upload_with_ingestion() {
     let doc_id = v["files"][0]["document_id"].as_str().expect("ingested doc id").to_string();
 
     // The ingested document shows up and is chattable.
-    let resp = app.clone().oneshot(req("GET", "/documents", Some(&access), None)).await.unwrap();
+    let resp = app.clone().oneshot(req("GET", "/api/v1/documents", Some(&access), None)).await.unwrap();
     let docs = body_json(resp).await;
     assert!(docs["documents"].as_array().unwrap().iter().any(|d| d["id"] == doc_id.as_str()));
 
     let resp = app
         .clone()
-        .oneshot(req("POST", "/chat", Some(&access), Some(json!({ "question": "What is the speed of light?" }))))
+        .oneshot(req("POST", "/api/v1/chat", Some(&access), Some(json!({ "question": "What is the speed of light?" }))))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
@@ -595,13 +595,13 @@ async fn image_upload_and_ocr_wiring() {
     // Upload without ingest always works; images report as ingestable.
     let resp = app
         .clone()
-        .oneshot(multipart_request("/files", &access, "receipt.png", "image/png", "\u{89}PNG-fake-bytes"))
+        .oneshot(multipart_request("/api/v1/files", &access, "receipt.png", "image/png", "\u{89}PNG-fake-bytes"))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     let file_id = body_json(resp).await["files"][0]["id"].as_str().unwrap().to_string();
 
-    let resp = app.clone().oneshot(req("GET", "/files", Some(&access), None)).await.unwrap();
+    let resp = app.clone().oneshot(req("GET", "/api/v1/files", Some(&access), None)).await.unwrap();
     let listed = body_json(resp).await;
     assert_eq!(listed["files"][0]["ingestable"], true);
     assert_eq!(listed["files"][0]["ingested"], false);
@@ -610,7 +610,7 @@ async fn image_upload_and_ocr_wiring() {
     // (decode error) — deterministic whether or not models are installed.
     let resp = app
         .clone()
-        .oneshot(req("POST", &format!("/files/{file_id}/ingest"), Some(&access), None))
+        .oneshot(req("POST", &format!("/api/v1/files/{file_id}/ingest"), Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
@@ -623,7 +623,7 @@ async fn plain_text_ingestion() {
 
     let request = Request::builder()
         .method("POST")
-        .uri("/documents?title=Notes")
+        .uri("/api/v1/documents?title=Notes")
         .extension(ConnectInfo("127.0.0.1:9999".parse::<SocketAddr>().unwrap()))
         .header(header::AUTHORIZATION, format!("Bearer {access}"))
         .header(header::CONTENT_TYPE, "text/plain")
