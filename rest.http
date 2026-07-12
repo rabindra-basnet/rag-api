@@ -7,13 +7,17 @@
 GET {{baseUrl}}/health
 
 ### Register a new user
+### Returns tokens + the user profile when SIGNUP_LOGIN=true (the default),
+### or just the user profile when SIGNUP_LOGIN=false.
 # @name register
 POST {{baseUrl}}/auth/register
 Content-Type: application/json
 
 {
   "email": "{{email}}",
-  "password": "{{password}}"
+  "password": "{{password}}",
+  "name": "Test User",
+  "username": "testuser"
 }
 
 ### Login
@@ -26,33 +30,40 @@ Content-Type: application/json
   "password": "{{password}}"
 }
 
-### Tokens captured from the login response
+### Access token captured from the login response body
 @accessToken = {{login.response.body.access_token}}
-@refreshToken = {{login.response.body.refresh_token}}
+### (The refresh_token is returned in the `refresh_token` HttpOnly cookie and
+###  sent automatically by the browser/REST Client on subsequent same-site calls.)
 
-### Current user
+### Current user — GET /auth/me returns { "user": { ...profile } }
+### Access token may be sent via the Authorization header (below) or the
+### `access_token` cookie that login/register/refresh set on the browser.
 GET {{baseUrl}}/auth/me
 Authorization: Bearer {{accessToken}}
 
-### Refresh tokens (rotates the refresh token — old one becomes invalid)
-# Browser clients can omit the body entirely: the HttpOnly cookie is used.
+### Update the current user's profile (name / username)
+PUT {{baseUrl}}/auth/me
+Authorization: Bearer {{accessToken}}
+Content-Type: application/json
+
+{
+  "name": "Test User Updated",
+  "username": "testuser2"
+}
+
+### Refresh tokens — POST /auth/refresh
+### Uses the `refresh_token` cookie (sent automatically). Issues a new
+### access_token (returned in the body) and rotates the refresh cookie.
 # @name refresh
 POST {{baseUrl}}/auth/refresh
-Content-Type: application/json
 
-{
-  "refresh_token": "{{refreshToken}}"
-}
-
-### Logout (revokes the refresh token)
+### Logout — POST /auth/logout
+### Sends the access token so the server can revoke it (jti denylist);
+### also clears the access_token and refresh_token cookies.
 POST {{baseUrl}}/auth/logout
-Content-Type: application/json
+Authorization: Bearer {{accessToken}}
 
-{
-  "refresh_token": "{{refreshToken}}"
-}
-
-### Ingest a document
+### Ingest a single document (JSON)
 # @name ingest
 POST {{baseUrl}}/documents
 Authorization: Bearer {{accessToken}}

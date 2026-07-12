@@ -1,18 +1,20 @@
 //! Integration tests: real router + real SQLite (temp file per test) + a
 //! mock OpenAI-compatible upstream for embeddings and chat completions.
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 
 use axum::body::Body;
 use axum::extract::ConnectInfo;
-use axum::http::{header, Request, StatusCode};
+use axum::http::{header, HeaderValue, Request, StatusCode};
 use axum::routing::post;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use tower::ServiceExt;
 
 use rag_backend::routes;
-use rag_backend::state::{http_client, AppState, Config};
+use rag_backend::config::parameter::Config;
+use rag_backend::state::app_state::AppState;
 
 /// Deterministic fake embedding: same text -> same vector.
 fn fake_embedding(text: &str) -> Vec<f32> {
@@ -63,7 +65,7 @@ async fn spawn_mock_llm() -> String {
 async fn test_app() -> Router {
     let mock_url = spawn_mock_llm().await;
     let db_path = std::env::temp_dir().join(format!("ragtest-{}.db", uuid::Uuid::new_v4()));
-    let pool = rag_backend::db::init(&format!("sqlite://{}?mode=rwc", db_path.display()))
+    let pool = rag_backend::config::database::init(&format!("sqlite://{}?mode=rwc", db_path.display()))
         .await
         .expect("test db");
 
@@ -75,6 +77,10 @@ async fn test_app() -> Router {
         refresh_ttl_days: 30,
         cookie_secure: false,
         trust_proxy: false,
+        signup_login: true,
+        cors_allow_origin: "*".into(),
+        cors_expose_headers: String::new(),
+        allowed_file_extensions: ".txt,.md,.csv,.json,.pdf,.png,.jpg,.jpeg,.webp,.gif,.xml,.html".into(),
         database_url: String::new(),
         bind_addr: String::new(),
         upload_dir: std::env::temp_dir()
@@ -89,9 +95,12 @@ async fn test_app() -> Router {
         embeddings_base_url: mock_url,
         embeddings_api_key: Some("test-key".into()),
         embeddings_model: "mock-embed".into(),
+        tokenizer_model: "gpt2".into(),
+        chunk_max_tokens: 512,
+        chunk_overlap_tokens: 64,
     };
 
-    routes::router(AppState { db: pool, http: http_client(), cfg })
+    routes::root::routes(AppState { db: pool, cfg })
 }
 
 fn req(method: &str, uri: &str, token: Option<&str>, body: Option<Value>) -> Request<Body> {
@@ -117,7 +126,28 @@ async fn body_json(resp: axum::response::Response) -> Value {
     serde_json::from_slice(&bytes).unwrap_or(Value::Null)
 }
 
-async fn register(app: &Router, email: &str) -> (String, String) {
+fn extract_cookies(resp: &axum::response::Response) -> HashMap<String, String> {
+    let mut cookies = HashMap::new();
+    for value in resp.headers().get_all(header::SET_COOKIE).iter() {
+        if let Ok(s) = value.to_str() {
+            if let Some((name, rest)) = s.split_once('=') {
+                let val = rest.split(';').next().unwrap_or("");
+                cookies.insert(name.to_string(), val.to_string());
+            }
+        }
+    }
+    cookies
+}
+
+fn cookie_header(cookies: &HashMap<String, String>) -> String {
+    cookies
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
+async fn register(app: &Router, email: &str) -> (String, HashMap<String, String>) {
     let resp = app
         .clone()
         .oneshot(req(
@@ -129,11 +159,35 @@ async fn register(app: &Router, email: &str) -> (String, String) {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
+    let cookies = extract_cookies(&resp);
     let v = body_json(resp).await;
     (
         v["access_token"].as_str().unwrap().to_string(),
-        v["refresh_token"].as_str().unwrap().to_string(),
+        cookies,
     )
+}
+
+async fn refresh_with_cookies(
+    app: &Router,
+    cookies: &HashMap<String, String>,
+) -> (axum::http::StatusCode, Value, HashMap<String, String>) {
+    let cookie = cookie_header(cookies);
+    let mut b = Request::builder()
+        .method("POST")
+        .uri("/auth/refresh")
+        .extension(ConnectInfo("127.0.0.1:9999".parse::<SocketAddr>().unwrap()));
+    if !cookie.is_empty() {
+        b = b.header(header::COOKIE, HeaderValue::from_str(&cookie).unwrap());
+    }
+    let resp = app
+        .clone()
+        .oneshot(b.body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    let status = resp.status();
+    let new_cookies = extract_cookies(&resp);
+    let body = body_json(resp).await;
+    (status, body, new_cookies)
 }
 
 #[tokio::test]
@@ -154,7 +208,7 @@ async fn register_login_me_flow() {
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    assert_eq!(body_json(resp).await["email"], "a@test.com");
+    assert_eq!(body_json(resp).await["user"]["email"], "a@test.com");
 
     // wrong password
     let resp = app
@@ -196,34 +250,61 @@ async fn validation_rejects_bad_input() {
 }
 
 #[tokio::test]
-async fn refresh_rotation_and_reuse_detection() {
+async fn logout_invalidates_access_token() {
     let app = test_app().await;
-    let (_, refresh1) = register(&app, "rot@test.com").await;
+    let (access, _) = register(&app, "logout@test.com").await;
 
-    // Rotate once — succeeds.
+    // Token works before logout.
     let resp = app
         .clone()
-        .oneshot(req("POST", "/auth/refresh", None, Some(json!({ "refresh_token": refresh1 }))))
+        .oneshot(req("GET", "/auth/me", Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
-    let refresh2 = body_json(resp).await["refresh_token"].as_str().unwrap().to_string();
 
-    // Replaying the rotated token fails AND revokes the family.
+    // Logout with the access token.
     let resp = app
         .clone()
-        .oneshot(req("POST", "/auth/refresh", None, Some(json!({ "refresh_token": refresh1 }))))
+        .oneshot(req("POST", "/auth/logout", Some(&access), None))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // The same access token must now be rejected (revoked jti).
+    let resp = app
+        .clone()
+        .oneshot(req("GET", "/auth/me", Some(&access), None))
         .await
         .unwrap();
     assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}
 
-    // The newer token from the same family is dead too.
+#[tokio::test]
+async fn refresh_issues_new_access_token() {
+    let app = test_app().await;
+    let (_, cookies) = register(&app, "rot@test.com").await;
+    assert!(cookies.contains_key("access_token"));
+    assert!(cookies.contains_key("refresh_token"));
+
+    // Refresh using the refresh cookie — returns a new access token.
+    let (status, body, new_cookies) = refresh_with_cookies(&app, &cookies).await;
+    assert_eq!(status, StatusCode::OK);
+    let new_access = body["access_token"].as_str().expect("access_token in body");
+    assert!(!new_access.is_empty());
+    assert!(new_cookies.contains_key("access_token"));
+    assert!(new_cookies.contains_key("refresh_token"));
+
+    // The new access token works on a protected route.
     let resp = app
         .clone()
-        .oneshot(req("POST", "/auth/refresh", None, Some(json!({ "refresh_token": refresh2 }))))
+        .oneshot(req("GET", "/auth/me", Some(new_access), None))
         .await
         .unwrap();
-    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    // Refreshing without a cookie fails.
+    let (status, _, _) = refresh_with_cookies(&app, &HashMap::new()).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
 
 #[tokio::test]

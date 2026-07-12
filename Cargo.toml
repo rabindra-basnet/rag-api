@@ -19,6 +19,7 @@ hex = "0.4"
 tower-http = { version = "0.6", features = ["cors", "trace", "limit", "timeout", "compression-gzip", "request-id", "sensitive-headers", "catch-panic"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-appender = "0.2"
 dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1.0.103"
@@ -32,6 +33,9 @@ pdf-extract = "0.12.0"
 ocrs = "0.12.2"
 image = "0.25.10"
 rten = "0.24.0"
+regex = "1"
+tokenizers = { version = "0.21", features = ["http"] }
+scraper = "0.23"
 
 [dev-dependencies]
 http-body-util = "0.1.3"

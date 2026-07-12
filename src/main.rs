@@ -1,20 +1,19 @@
-use rag_backend::state::{http_client, AppState, Config};
-use rag_backend::{db, routes};
+use rag_backend::config;
+use rag_backend::error;
+use rag_backend::routes;
+use rag_backend::state::app_state::AppState;
+use tracing_subscriber::prelude::*;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    dotenvy::dotenv().ok();
+    config::parameter::init();
 
-    let cfg = Config::from_env();
-    let dev = cfg.environment == "development";
-    rag_backend::error::set_dev_mode(dev);
+    let dev = config::parameter::get().environment == "development";
+    error::api_error::set_dev_mode(dev);
     if dev && std::env::var("RUST_BACKTRACE").is_err() {
-        // Full tracebacks on panics during development.
         std::env::set_var("RUST_BACKTRACE", "1");
     }
 
-    // Development: verbose, human-readable logs with file:line. Production:
-    // compact info-level (override either with RUST_LOG).
     let default_filter = if dev {
         "rag_backend=trace,tower_http=debug,sqlx=debug"
     } else {
@@ -22,34 +21,45 @@ async fn main() -> anyhow::Result<()> {
     };
     let filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| default_filter.into());
-    if dev {
-        tracing_subscriber::fmt()
-            .with_env_filter(filter)
-            .pretty()
-            .with_file(true)
-            .with_line_number(true)
-            .init();
-    } else {
-        tracing_subscriber::fmt().with_env_filter(filter).init();
+
+    let logs_dir = std::path::Path::new("logs");
+    if !logs_dir.exists() {
+        std::fs::create_dir_all(logs_dir).ok();
     }
+    let file_appender = tracing_appender::rolling::daily("logs", "app.log");
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(file_appender)
+        .with_ansi(false)
+        .with_target(true)
+        .with_filter(filter.clone());
+
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_file(dev)
+        .with_line_number(dev)
+        .with_filter(filter);
+
+    tracing_subscriber::registry()
+        .with(file_layer)
+        .with(console_layer)
+        .init();
+
+    let cfg = config::parameter::get();
     tracing::info!(environment = cfg.environment, "starting");
-    let pool = db::init(&cfg.database_url).await?;
+
+    let pool = config::database::init(&cfg.database_url).await?;
 
     let state = AppState {
         db: pool,
-        http: http_client(),
-        cfg,
+        cfg: cfg.clone(),
     };
 
-    let bind_addr = state.cfg.bind_addr.clone();
-    let app = routes::router(state);
+    let bind_addr = cfg.bind_addr.clone();
+    let app = routes::root::routes(state);
 
     let listener = tokio::net::TcpListener::bind(&bind_addr).await?;
     tracing::info!("listening on {bind_addr}");
     axum::serve(
         listener,
-        // ConnectInfo gives the rate limiter the peer IP when no proxy
-        // headers are present.
         app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
     )
     .with_graceful_shutdown(shutdown_signal())
