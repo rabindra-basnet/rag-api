@@ -9,12 +9,24 @@ use crate::state::AppState;
 use crate::{auth, rag};
 
 pub fn router(state: AppState) -> Router {
+    let trust_proxy = state.cfg.trust_proxy;
+
+    // Credential endpoints get a tight budget (blunts brute force);
+    // everything else gets a budget sized for normal app traffic.
+    let auth_public = crate::middleware::rate_limit(
+        Router::new()
+            .route("/auth/register", post(auth::handlers::register))
+            .route("/auth/login", post(auth::handlers::login))
+            .route("/auth/refresh", post(auth::handlers::refresh))
+            .route("/auth/logout", post(auth::handlers::logout)),
+        1,  // refill 1 req/s
+        10, // burst 10
+        trust_proxy,
+    );
+
     let public = Router::new()
         .route("/health", get(|| async { "ok" }))
-        .route("/auth/register", post(auth::handlers::register))
-        .route("/auth/login", post(auth::handlers::login))
-        .route("/auth/refresh", post(auth::handlers::refresh))
-        .route("/auth/logout", post(auth::handlers::logout));
+        .merge(auth_public);
 
     let protected = Router::new()
         .route("/auth/me", get(auth::handlers::me))
@@ -27,6 +39,7 @@ pub fn router(state: AppState) -> Router {
             state.clone(),
             auth::middleware::require_auth,
         ));
+    let protected = crate::middleware::rate_limit(protected, 5, 50, trust_proxy);
 
     crate::middleware::apply(public.merge(protected)).with_state(state)
 }

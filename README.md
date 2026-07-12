@@ -83,6 +83,23 @@ Example chat response:
 
 Request pipeline: panic recovery → `x-request-id` generation/propagation → auth-header redaction in traces → HTTP tracing → 120 s timeout (LLM calls are slow) → CORS → gzip compression → 50 MiB body cap. Graceful shutdown drains connections on SIGINT/SIGTERM. Request bodies are validated declaratively (`validator` crate) via a `ValidatedJson` extractor that returns structured JSON 400s.
 
+## Rate limiting
+
+Per-IP token buckets (`tower_governor`): `/auth/*` refills 1 req/s with a burst of 10 (brute-force protection); all authenticated routes refill 5 req/s with a burst of 50. Over-limit requests get `429` with `Retry-After`.
+
+Behind nginx, set `TRUST_PROXY=true` so limits key on the real client IP, and make sure nginx sets the forwarding headers:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Host $host;
+}
+```
+
+With `TRUST_PROXY=false` (default) the peer address is used, so a direct client can't spoof `X-Forwarded-For` to dodge the limit.
+
 ## Security
 
 - **Access tokens**: HS256 JWTs with pinned algorithm, `iss`/`aud` validation, required `exp`/`nbf`, `jti`, and a `typ: "access"` claim so refresh tokens can never pass as access tokens.

@@ -26,6 +26,7 @@ pub struct Config {
     pub access_ttl_minutes: i64,
     pub refresh_ttl_days: i64,
     pub cookie_secure: bool,
+    pub trust_proxy: bool,
     pub database_url: String,
     pub bind_addr: String,
     // Chat completions (OpenRouter or any OpenAI-compatible API)
@@ -66,6 +67,12 @@ impl Config {
                 .unwrap_or(30),
             // Set true behind HTTPS in production.
             cookie_secure: std::env::var("COOKIE_SECURE")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
+            // Only trust Forwarded/X-Forwarded-For for rate-limit keying when
+            // actually behind a proxy that overwrites them; otherwise a
+            // direct client could spoof the header to dodge the limit.
+            trust_proxy: std::env::var("TRUST_PROXY")
                 .map(|v| v == "true" || v == "1")
                 .unwrap_or(false),
             database_url: std::env::var("DATABASE_URL")
