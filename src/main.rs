@@ -4,7 +4,7 @@ use rag_backend::{db, routes};
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cfg = Config::from_env();
-    let pool = db::init(&cfg.database_url).await?;
+    let pool = db::init(&cfg.database_url, std::path::Path::new(&cfg.migrations_path)).await?;
 
     let state = AppState {
         db: pool,

@@ -1,8 +1,10 @@
+use sqlx::migrate::Migrator;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use sqlx::SqlitePool;
+use std::path::Path;
 use std::str::FromStr;
 
-pub async fn init(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
+pub async fn init(database_url: &str, migrations: &Path) -> Result<SqlitePool, sqlx::Error> {
     let opts = SqliteConnectOptions::from_str(database_url)?
         .create_if_missing(true)
         .foreign_keys(true)
@@ -13,8 +15,9 @@ pub async fn init(database_url: &str) -> Result<SqlitePool, sqlx::Error> {
         .connect_with(opts)
         .await?;
 
-    // Versioned migrations from ./migrations, embedded at compile time.
-    sqlx::migrate!("./migrations").run(&pool).await?;
+    // Versioned migrations loaded at runtime from the given directory
+    // (deploy the migrations/ folder alongside the binary).
+    Migrator::new(migrations).await?.run(&pool).await?;
 
     Ok(pool)
 }

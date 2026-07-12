@@ -23,6 +23,7 @@ pub struct Config {
     pub cookie_secure: bool,
     pub trust_proxy: bool,
     pub database_url: String,
+    pub migrations_path: String,
     pub bind_addr: String,
     // Chat completions (OpenRouter or any OpenAI-compatible API)
     pub llm_base_url: String,
@@ -84,6 +85,7 @@ impl Config {
             // direct client could spoof the header to dodge the limit.
             trust_proxy: env_flag("TRUST_PROXY"),
             database_url: env_or("DATABASE_URL", "sqlite://rag.db?mode=rwc"),
+            migrations_path: env_or("MIGRATIONS_PATH", "./migrations"),
             bind_addr: env_or("BIND_ADDR", "0.0.0.0:3000"),
             llm_model: env_first(&["LLM_MODEL", "OPENROUTER_MODEL"])
                 .unwrap_or_else(|| "meta-llama/llama-3.3-70b-instruct".into()),

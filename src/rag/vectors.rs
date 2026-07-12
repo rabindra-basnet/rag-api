@@ -36,7 +36,7 @@ mod tests {
 
     #[test]
     fn roundtrip() {
-        let v = vec![1.0f32, -2.5, 0.0, 3.14];
+        let v = vec![1.0f32, -2.5, 0.0, 7.25];
         assert_eq!(decode(&encode(&v)), v);
     }
 
