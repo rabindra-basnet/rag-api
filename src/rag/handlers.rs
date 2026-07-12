@@ -109,7 +109,7 @@ pub async fn ingest_for_file(
 }
 
 async fn insert_chunks(
-    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tx: &mut crate::db::DbTx<'_>,
     doc_id: Uuid,
     user_id: Uuid,
     chunks: &[String],

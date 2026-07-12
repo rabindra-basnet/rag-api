@@ -4,6 +4,12 @@ use sqlx::SqlitePool;
 use std::path::Path;
 use std::str::FromStr;
 
+/// The one place that names the concrete database. SQLite for development
+/// and testing today; switching to Postgres means changing these aliases
+/// (and init()) — the rest of the codebase only uses `Db` / `DbTx`.
+pub type Db = SqlitePool;
+pub type DbTx<'t> = sqlx::Transaction<'t, sqlx::Sqlite>;
+
 /// Resolved at runtime relative to the working directory — run the binary
 /// from the project/deploy root, with the migrations/ folder next to it.
 const MIGRATIONS_PATH: &str = "./migrations";

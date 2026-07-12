@@ -1,8 +1,8 @@
-use sqlx::SqlitePool;
+use crate::db::Db;
 
 #[derive(Clone)]
 pub struct AppState {
-    pub db: SqlitePool,
+    pub db: Db,
     pub cfg: Config,
     /// Shared HTTP client for the OpenAI-compatible upstreams.
     pub http: reqwest::Client,
@@ -30,6 +30,8 @@ pub struct Config {
     pub llm_api_key: Option<String>,
     pub llm_model: String,
     pub llm_max_tokens: u32,
+    /// Vision-capable model used for image OCR (defaults to llm_model).
+    pub vision_model: String,
     // Embeddings (OpenRouter doesn't serve embeddings, so this can point elsewhere,
     // e.g. OpenAI, Together, Jina, or a local server like Ollama/llama.cpp)
     pub embeddings_base_url: String,
@@ -90,6 +92,8 @@ impl Config {
             llm_model: env_first(&["LLM_MODEL", "OPENROUTER_MODEL"])
                 .unwrap_or_else(|| "meta-llama/llama-3.3-70b-instruct".into()),
             llm_max_tokens: env_parse("LLM_MAX_TOKENS", 1024),
+            vision_model: env_first(&["VISION_MODEL", "LLM_MODEL", "OPENROUTER_MODEL"])
+                .unwrap_or_else(|| "meta-llama/llama-3.3-70b-instruct".into()),
             // Default to the same provider as chat; override only if your
             // chat provider doesn't serve embeddings.
             embeddings_base_url: env_or("EMBEDDINGS_BASE_URL", &llm_base_url),

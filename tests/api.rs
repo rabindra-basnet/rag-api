@@ -83,6 +83,7 @@ async fn test_app() -> Router {
         llm_api_key: Some("test-key".into()),
         llm_model: "mock-model".into(),
         llm_max_tokens: 256,
+        vision_model: "mock-vision".into(),
         embeddings_base_url: mock_url,
         embeddings_api_key: Some("test-key".into()),
         embeddings_model: "mock-embed".into(),
@@ -497,6 +498,34 @@ async fn file_upload_with_ingestion() {
         .unwrap();
     assert_eq!(resp.status(), StatusCode::OK);
     assert!(!body_json(resp).await["sources"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn image_upload_ocr_ingestion() {
+    let app = test_app().await;
+    let (access, _) = register(&app, "img@test.com").await;
+
+    // Any bytes work — the mock vision model "transcribes" regardless.
+    let resp = app
+        .clone()
+        .oneshot(multipart_request(
+            "/files?ingest=true",
+            &access,
+            "receipt.png",
+            "image/png",
+            "\u{89}PNG-fake-bytes",
+        ))
+        .await
+        .unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let v = body_json(resp).await;
+    assert!(v["files"][0]["document_id"].as_str().is_some(), "image OCR should produce a document");
+
+    // Images report as ingestable in the list.
+    let resp = app.clone().oneshot(req("GET", "/files", Some(&access), None)).await.unwrap();
+    let listed = body_json(resp).await;
+    assert_eq!(listed["files"][0]["ingestable"], true);
+    assert_eq!(listed["files"][0]["ingested"], true);
 }
 
 #[tokio::test]

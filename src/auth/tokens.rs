@@ -1,6 +1,6 @@
 use chrono::{Duration, Utc};
 use sha2::{Digest, Sha256};
-use sqlx::SqlitePool;
+use crate::db::Db;
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -21,7 +21,7 @@ fn hash_token(token: &str) -> String {
 }
 
 pub async fn issue(
-    db: &SqlitePool,
+    db: &Db,
     jwt_secret: &str,
     user_id: Uuid,
     family_id: Option<Uuid>,
@@ -51,7 +51,7 @@ pub struct RotatedRefresh {
 
 /// Validate + rotate a refresh token. Reuse of a revoked token kills the family.
 pub async fn rotate(
-    db: &SqlitePool,
+    db: &Db,
     jwt_secret: &str,
     token: &str,
     ttl_days: i64,
@@ -110,7 +110,7 @@ pub async fn rotate(
     })
 }
 
-pub async fn revoke(db: &SqlitePool, token: &str) -> Result<(), ApiError> {
+pub async fn revoke(db: &Db, token: &str) -> Result<(), ApiError> {
     sqlx::query("UPDATE refresh_tokens SET revoked_at = ? WHERE token_hash = ? AND revoked_at IS NULL")
         .bind(Utc::now().to_rfc3339())
         .bind(hash_token(token))

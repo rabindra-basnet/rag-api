@@ -44,10 +44,31 @@ fn is_pdf(content_type: &str, filename: &str) -> bool {
     content_type == "application/pdf" || filename.to_lowercase().ends_with(".pdf")
 }
 
-/// Extract ingestable text from an uploaded file, by type.
-/// Returns Ok(None) for types we can't extract from (images would need
-/// OCR — add a tesseract-backed branch here when that's wanted).
+/// Image types the vision-LLM OCR path accepts.
+fn image_mime(content_type: &str, filename: &str) -> Option<&'static str> {
+    let name = filename.to_lowercase();
+    match content_type {
+        "image/png" | "image/jpeg" | "image/webp" | "image/gif" => {
+            Some(match content_type {
+                "image/png" => "image/png",
+                "image/jpeg" => "image/jpeg",
+                "image/webp" => "image/webp",
+                _ => "image/gif",
+            })
+        }
+        _ if name.ends_with(".png") => Some("image/png"),
+        _ if name.ends_with(".jpg") || name.ends_with(".jpeg") => Some("image/jpeg"),
+        _ if name.ends_with(".webp") => Some("image/webp"),
+        _ if name.ends_with(".gif") => Some("image/gif"),
+        _ => None,
+    }
+}
+
+/// Extract ingestable text from an uploaded file, by type: text-ish files
+/// as utf-8, PDFs via pdf-extract, images via vision-LLM OCR (no system
+/// OCR dependency). Returns Ok(None) for types we can't extract from.
 async fn extract_text(
+    state: &AppState,
     content_type: &str,
     filename: &str,
     data: &[u8],
@@ -67,6 +88,10 @@ async fn extract_text(
             })?;
         let text = text.trim().to_string();
         return Ok((!text.is_empty()).then_some(text));
+    }
+    if let Some(mime) = image_mime(content_type, filename) {
+        let text = crate::llm::image_to_text(state, mime, data).await?;
+        return Ok(Some(text));
     }
     Ok(None)
 }
@@ -123,7 +148,7 @@ pub async fn upload(
         // it into the RAG index.
         let mut document_id: Option<String> = None;
         if query.ingest {
-            if let Some(text) = extract_text(&content_type, &filename, &data).await? {
+            if let Some(text) = extract_text(&state, &content_type, &filename, &data).await? {
                 let doc = crate::rag::handlers::ingest_for_file(&state, &user, &filename, &text)
                     .await
                     .inspect_err(|_| {
@@ -168,7 +193,9 @@ pub async fn upload(
 
 /// True when we know how to extract text from this file type.
 fn is_ingestable(content_type: &str, filename: &str) -> bool {
-    is_texty(content_type, filename) || is_pdf(content_type, filename)
+    is_texty(content_type, filename)
+        || is_pdf(content_type, filename)
+        || image_mime(content_type, filename).is_some()
 }
 
 pub async fn list(
@@ -223,7 +250,7 @@ pub async fn ingest(
         ApiError::NotFound
     })?;
 
-    let text = extract_text(&file.content_type, &file.filename, &data)
+    let text = extract_text(&state, &file.content_type, &file.filename, &data)
         .await?
         .ok_or_else(|| ApiError::BadRequest("no extractable text in file".into()))?;
 
