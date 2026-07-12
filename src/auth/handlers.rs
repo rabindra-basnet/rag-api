@@ -135,7 +135,7 @@ pub async fn refresh(
     let token = refresh_token_from(&jar, body)?;
     let rotated = tokens::rotate(
         &state.db,
-        &state.cfg.jwt_secret,
+        &state.cfg.refresh_jwt_secret,
         &token,
         state.cfg.refresh_ttl_days,
     )
@@ -197,7 +197,7 @@ async fn session_response(
     )?;
     let refresh = tokens::issue(
         &state.db,
-        &state.cfg.jwt_secret,
+        &state.cfg.refresh_jwt_secret,
         user_id,
         None,
         state.cfg.refresh_ttl_days,

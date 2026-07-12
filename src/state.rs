@@ -18,6 +18,9 @@ pub fn http_client() -> reqwest::Client {
 #[derive(Clone)]
 pub struct Config {
     pub jwt_secret: String,
+    /// Separate signing key for refresh JWTs: a leaked/cracked access-token
+    /// key can never forge refresh tokens, and vice versa.
+    pub refresh_jwt_secret: String,
     pub access_ttl_minutes: i64,
     pub refresh_ttl_days: i64,
     pub cookie_secure: bool,
@@ -74,10 +77,17 @@ impl Config {
             rand::thread_rng().fill_bytes(&mut buf);
             hex::encode(buf)
         });
+        // Prefer an independent secret; otherwise derive one from JWT_SECRET
+        // so the two key spaces are still distinct.
+        let refresh_jwt_secret = std::env::var("REFRESH_JWT_SECRET").unwrap_or_else(|_| {
+            use sha2::{Digest, Sha256};
+            hex::encode(Sha256::digest(format!("{jwt_secret}:refresh-v1").as_bytes()))
+        });
         let llm_base_url = env_or("LLM_BASE_URL", "https://openrouter.ai/api/v1");
         let llm_api_key = env_first(&["LLM_API_KEY", "OPENROUTER_API_KEY"]);
         Self {
             jwt_secret,
+            refresh_jwt_secret,
             access_ttl_minutes: env_parse("ACCESS_TTL_MINUTES", 15),
             refresh_ttl_days: env_parse("REFRESH_TTL_DAYS", 30),
             // Set true behind HTTPS in production.

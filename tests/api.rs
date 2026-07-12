@@ -69,6 +69,7 @@ async fn test_app() -> Router {
 
     let cfg = Config {
         jwt_secret: "integration-test-secret".into(),
+        refresh_jwt_secret: "integration-test-refresh-secret".into(),
         access_ttl_minutes: 15,
         refresh_ttl_days: 30,
         cookie_secure: false,
