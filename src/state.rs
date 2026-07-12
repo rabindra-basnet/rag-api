@@ -25,6 +25,7 @@ pub struct Config {
     pub jwt_secret: String,
     pub access_ttl_minutes: i64,
     pub refresh_ttl_days: i64,
+    pub cookie_secure: bool,
     pub database_url: String,
     pub bind_addr: String,
     // Chat completions (OpenRouter or any OpenAI-compatible API)
@@ -63,6 +64,10 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(30),
+            // Set true behind HTTPS in production.
+            cookie_secure: std::env::var("COOKIE_SECURE")
+                .map(|v| v == "true" || v == "1")
+                .unwrap_or(false),
             database_url: std::env::var("DATABASE_URL")
                 .unwrap_or_else(|_| "sqlite://rag.db?mode=rwc".into()),
             bind_addr: std::env::var("BIND_ADDR").unwrap_or_else(|_| "0.0.0.0:3000".into()),

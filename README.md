@@ -55,10 +55,18 @@ Auth endpoints are public; everything else needs `Authorization: Bearer <access_
 | POST | `/auth/refresh` | `{refresh_token}` | Rotates refresh, new access token |
 | POST | `/auth/logout` | `{refresh_token}` | Revokes the refresh token |
 | GET | `/auth/me` | — | Current user |
-| POST | `/documents` | `{title, content}` | Chunk + embed + store |
+| POST | `/documents` | see below | Ingest one or many documents |
+| PUT | `/documents/{id}` | `{title, content}` | Replace content: re-chunks + re-embeds atomically |
 | GET | `/documents` | — | List own documents |
 | DELETE | `/documents/{id}` | — | Delete document + its chunks |
 | POST | `/chat` | `{question, top_k?}` | RAG answer with cited sources |
+
+`POST /documents` accepts, by Content-Type (documents up to 10 MB each, max 50 per batch):
+
+- `application/json`: `{title, content}` or an array `[{title, content}, ...]`
+- `text/plain`: raw body is the content, title via `?title=` query param
+
+Refresh tokens are returned in the JSON body **and** set as an `HttpOnly; SameSite=Strict` cookie scoped to `/auth` — browser clients can call `/auth/refresh` and `/auth/logout` with no body at all. Set `COOKIE_SECURE=true` behind HTTPS.
 
 Example chat response:
 
@@ -71,10 +79,14 @@ Example chat response:
 }
 ```
 
+## Production middleware (tower)
+
+Request pipeline: panic recovery → `x-request-id` generation/propagation → auth-header redaction in traces → HTTP tracing → 120 s timeout (LLM calls are slow) → CORS → gzip compression → 50 MiB body cap. Graceful shutdown drains connections on SIGINT/SIGTERM. Request bodies are validated declaratively (`validator` crate) via a `ValidatedJson` extractor that returns structured JSON 400s.
+
 ## Security
 
 - **Access tokens**: HS256 JWTs with pinned algorithm, `iss`/`aud` validation, required `exp`/`nbf`, `jti`, and a `typ: "access"` claim so refresh tokens can never pass as access tokens.
-- **Refresh tokens**: opaque 256-bit random values, stored only as SHA-256 hashes, rotated on every use. Replaying a rotated token revokes the entire token family (reuse detection).
+- **Refresh tokens**: JWTs typed `"refresh"`, but stateful — every token's SHA-256 hash lives in the DB, so a valid signature alone is never enough. Rotated on every use; replaying a rotated token revokes the entire token family (reuse detection). Also delivered as an `HttpOnly` cookie for browsers.
 - **Passwords**: Argon2id hashes; login verifies against a dummy hash for missing users to keep response timing uniform (no user enumeration).
 - All documents, chunks, and queries are scoped per user.
 

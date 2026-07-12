@@ -15,49 +15,69 @@ use super::vectors;
 
 const CHUNK_MAX_CHARS: usize = 1500;
 const CHUNK_OVERLAP_CHARS: usize = 200;
-const MAX_DOCUMENT_CHARS: usize = 500_000;
+const MAX_DOCUMENT_CHARS: usize = 10 * 1024 * 1024; // 10 MB, matches the body limit
 const TOP_K: usize = 5;
 const EMBED_BATCH: usize = 64;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, validator::Validate)]
 pub struct IngestReq {
+    #[validate(length(min = 1, max = 500, message = "title must be 1-500 characters"))]
     pub title: String,
+    #[validate(length(min = 1, message = "content is empty"))]
     pub content: String,
 }
 
+/// JSON body may be a single document or an array of documents.
 #[derive(Deserialize)]
+#[serde(untagged)]
+pub enum IngestBody {
+    One(IngestReq),
+    Many(Vec<IngestReq>),
+}
+
+#[derive(Deserialize)]
+pub struct TextIngestQuery {
+    pub title: Option<String>,
+}
+
+#[derive(Deserialize, validator::Validate)]
 pub struct ChatReq {
+    #[validate(length(min = 1, max = 4000, message = "question must be 1-4000 characters"))]
     pub question: String,
+    #[validate(range(min = 1, max = 20, message = "top_k must be 1-20"))]
     #[serde(default)]
     pub top_k: Option<usize>,
 }
 
-pub async fn ingest_document(
-    State(state): State<AppState>,
-    user: AuthUser,
-    Json(req): Json<IngestReq>,
-) -> Result<Json<Value>, ApiError> {
-    let title = req.title.trim();
+fn validate_doc(title: &str, content: &str) -> Result<(), ApiError> {
     if title.is_empty() || title.len() > 500 {
         return Err(ApiError::BadRequest("title must be 1-500 characters".into()));
     }
-    if req.content.trim().is_empty() {
+    if content.trim().is_empty() {
         return Err(ApiError::BadRequest("content is empty".into()));
     }
-    if req.content.len() > MAX_DOCUMENT_CHARS {
+    if content.len() > MAX_DOCUMENT_CHARS {
         return Err(ApiError::BadRequest("document too large".into()));
     }
+    Ok(())
+}
 
-    let chunks = chunk_text(&req.content, CHUNK_MAX_CHARS, CHUNK_OVERLAP_CHARS);
+/// Chunk + embed + store one document. Embeds before writing anything, so a
+/// failed upstream call leaves no half-ingested document behind.
+async fn ingest_one(
+    state: &AppState,
+    user: &AuthUser,
+    title: &str,
+    content: &str,
+) -> Result<Value, ApiError> {
+    let chunks = chunk_text(content, CHUNK_MAX_CHARS, CHUNK_OVERLAP_CHARS);
     if chunks.is_empty() {
         return Err(ApiError::BadRequest("no usable content".into()));
     }
 
-    // Embed before writing anything, so a failed upstream call leaves no
-    // half-ingested document behind.
     let mut embeddings: Vec<Vec<f32>> = Vec::with_capacity(chunks.len());
     for batch in chunks.chunks(EMBED_BATCH) {
-        embeddings.extend(llm::embed(&state, batch).await?);
+        embeddings.extend(llm::embed(state, batch).await?);
     }
 
     let doc_id = Uuid::new_v4();
@@ -69,28 +89,140 @@ pub async fn ingest_document(
         .bind(Utc::now().to_rfc3339())
         .execute(&mut *tx)
         .await?;
+    insert_chunks(&mut tx, doc_id, user.id, &chunks, &embeddings).await?;
+    tx.commit().await?;
 
-    for (i, (content, emb)) in chunks.iter().zip(&embeddings).enumerate() {
+    Ok(json!({ "id": doc_id, "title": title, "chunks": chunks.len() }))
+}
+
+async fn insert_chunks(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    doc_id: Uuid,
+    user_id: Uuid,
+    chunks: &[String],
+    embeddings: &[Vec<f32>],
+) -> Result<(), ApiError> {
+    for (i, (content, emb)) in chunks.iter().zip(embeddings).enumerate() {
         sqlx::query(
             "INSERT INTO chunks (id, document_id, user_id, chunk_index, content, embedding)
              VALUES (?, ?, ?, ?, ?, ?)",
         )
         .bind(Uuid::new_v4().to_string())
         .bind(doc_id.to_string())
-        .bind(user.id.to_string())
+        .bind(user_id.to_string())
         .bind(i as i64)
         .bind(content)
         .bind(vectors::encode(emb))
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     }
+    Ok(())
+}
+
+/// POST /documents — Content-Type dependent:
+/// - `application/json`: `{title, content}` or `[{title, content}, ...]`
+/// - `text/plain`: raw body is the content; title from `?title=` (or "Untitled")
+pub async fn ingest_document(
+    State(state): State<AppState>,
+    user: AuthUser,
+    axum::extract::Query(query): axum::extract::Query<TextIngestQuery>,
+    headers: axum::http::HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, ApiError> {
+    let content_type = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let docs: Vec<IngestReq> = if content_type.starts_with("application/json") {
+        match serde_json::from_slice::<IngestBody>(&body)
+            .map_err(|e| ApiError::BadRequest(format!("invalid json body: {e}")))?
+        {
+            IngestBody::One(d) => vec![d],
+            IngestBody::Many(ds) => ds,
+        }
+    } else if content_type.starts_with("text/plain") || content_type.is_empty() {
+        let content = String::from_utf8(body.to_vec())
+            .map_err(|_| ApiError::BadRequest("body is not valid utf-8".into()))?;
+        vec![IngestReq {
+            title: query.title.unwrap_or_else(|| "Untitled".into()),
+            content,
+        }]
+    } else {
+        return Err(ApiError::BadRequest(format!(
+            "unsupported content-type: {content_type} (use application/json or text/plain)"
+        )));
+    };
+
+    if docs.is_empty() {
+        return Err(ApiError::BadRequest("no documents provided".into()));
+    }
+    if docs.len() > 50 {
+        return Err(ApiError::BadRequest("too many documents (max 50)".into()));
+    }
+    // Validate everything up front so a bad document fails the batch early.
+    for d in &docs {
+        validate_doc(d.title.trim(), &d.content)?;
+    }
+
+    let mut results = Vec::with_capacity(docs.len());
+    for d in &docs {
+        results.push(ingest_one(&state, &user, d.title.trim(), &d.content).await?);
+    }
+
+    if results.len() == 1 {
+        Ok(Json(results.into_iter().next().unwrap()))
+    } else {
+        Ok(Json(json!({ "documents": results, "count": results.len() })))
+    }
+}
+
+/// PUT /documents/{id} — replace title/content: re-chunks, re-embeds, and
+/// swaps all chunks atomically.
+pub async fn update_document(
+    State(state): State<AppState>,
+    user: AuthUser,
+    Path(id): Path<Uuid>,
+    crate::validation::ValidatedJson(req): crate::validation::ValidatedJson<IngestReq>,
+) -> Result<Json<Value>, ApiError> {
+    let title = req.title.trim();
+    validate_doc(title, &req.content)?;
+
+    let owned: Option<(String,)> =
+        sqlx::query_as("SELECT id FROM documents WHERE id = ? AND user_id = ?")
+            .bind(id.to_string())
+            .bind(user.id.to_string())
+            .fetch_optional(&state.db)
+            .await?;
+    if owned.is_none() {
+        return Err(ApiError::NotFound);
+    }
+
+    let chunks = chunk_text(&req.content, CHUNK_MAX_CHARS, CHUNK_OVERLAP_CHARS);
+    if chunks.is_empty() {
+        return Err(ApiError::BadRequest("no usable content".into()));
+    }
+    let mut embeddings: Vec<Vec<f32>> = Vec::with_capacity(chunks.len());
+    for batch in chunks.chunks(EMBED_BATCH) {
+        embeddings.extend(llm::embed(&state, batch).await?);
+    }
+
+    // Old chunks stay live until the new ones are ready; swap is atomic.
+    let mut tx = state.db.begin().await?;
+    sqlx::query("UPDATE documents SET title = ? WHERE id = ?")
+        .bind(title)
+        .bind(id.to_string())
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("DELETE FROM chunks WHERE document_id = ?")
+        .bind(id.to_string())
+        .execute(&mut *tx)
+        .await?;
+    insert_chunks(&mut tx, id, user.id, &chunks, &embeddings).await?;
     tx.commit().await?;
 
-    Ok(Json(json!({
-        "id": doc_id,
-        "title": title,
-        "chunks": chunks.len(),
-    })))
+    Ok(Json(json!({ "id": id, "title": title, "chunks": chunks.len() })))
 }
 
 pub async fn list_documents(
@@ -135,7 +267,7 @@ pub async fn delete_document(
 pub async fn chat(
     State(state): State<AppState>,
     user: AuthUser,
-    Json(req): Json<ChatReq>,
+    crate::validation::ValidatedJson(req): crate::validation::ValidatedJson<ChatReq>,
 ) -> Result<Json<Value>, ApiError> {
     let question = req.question.trim();
     if question.is_empty() || question.len() > 4000 {

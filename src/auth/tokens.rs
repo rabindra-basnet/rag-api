@@ -1,14 +1,17 @@
 use chrono::{Duration, Utc};
-use rand::RngCore;
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use uuid::Uuid;
 
 use crate::error::ApiError;
 
-/// Opaque refresh token: 32 random bytes, hex to the client, only the
-/// SHA-256 hash stored. Rotation is tracked per family so a replayed
-/// (already-rotated) token revokes the whole family.
+use super::jwt::{issue_refresh_token, verify_refresh_token};
+
+/// Refresh tokens are signed JWTs (typ = "refresh"), but the SHA-256 hash of
+/// every issued token is also stored server-side. A refresh therefore needs
+/// BOTH a valid signature AND a live DB row — so tokens stay revocable, are
+/// rotated on every use, and replaying a rotated token revokes its whole
+/// family (reuse detection).
 pub struct IssuedRefresh {
     pub token: String,
 }
@@ -17,19 +20,14 @@ fn hash_token(token: &str) -> String {
     hex::encode(Sha256::digest(token.as_bytes()))
 }
 
-fn new_opaque_token() -> String {
-    let mut buf = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut buf);
-    hex::encode(buf)
-}
-
 pub async fn issue(
     db: &SqlitePool,
+    jwt_secret: &str,
     user_id: Uuid,
     family_id: Option<Uuid>,
     ttl_days: i64,
 ) -> Result<IssuedRefresh, ApiError> {
-    let token = new_opaque_token();
+    let token = issue_refresh_token(jwt_secret, user_id, ttl_days)?;
     let now = Utc::now();
     sqlx::query(
         "INSERT INTO refresh_tokens (id, user_id, token_hash, family_id, expires_at, created_at)
@@ -54,9 +52,13 @@ pub struct RotatedRefresh {
 /// Validate + rotate a refresh token. Reuse of a revoked token kills the family.
 pub async fn rotate(
     db: &SqlitePool,
+    jwt_secret: &str,
     token: &str,
     ttl_days: i64,
 ) -> Result<RotatedRefresh, ApiError> {
+    // Signature, exp, iss/aud, and typ checked before we ever touch the DB.
+    let claims = verify_refresh_token(jwt_secret, token)?;
+
     let hash = hash_token(token);
     let row: Option<(String, String, String, String, Option<String>)> = sqlx::query_as(
         "SELECT id, user_id, family_id, expires_at, revoked_at
@@ -70,6 +72,11 @@ pub async fn rotate(
         return Err(ApiError::Unauthorized);
     };
 
+    // The signed sub must match the row we found for that token.
+    if claims.sub != user_id {
+        return Err(ApiError::Unauthorized);
+    }
+
     if revoked_at.is_some() {
         // Token reuse — revoke the entire family.
         tracing::warn!(user_id, "refresh token reuse detected; revoking family");
@@ -81,6 +88,7 @@ pub async fn rotate(
         return Err(ApiError::Unauthorized);
     }
 
+    // DB-side expiry check (belt to the JWT exp's suspenders).
     let expired = chrono::DateTime::parse_from_rfc3339(&expires_at)
         .map(|t| t < Utc::now())
         .unwrap_or(true);
@@ -96,7 +104,7 @@ pub async fn rotate(
 
     let user_uuid = Uuid::parse_str(&user_id).map_err(|_| ApiError::Unauthorized)?;
     let family_uuid = Uuid::parse_str(&family_id).ok();
-    let issued = issue(db, user_uuid, family_uuid, ttl_days).await?;
+    let issued = issue(db, jwt_secret, user_uuid, family_uuid, ttl_days).await?;
 
     Ok(RotatedRefresh {
         user_id: user_uuid,

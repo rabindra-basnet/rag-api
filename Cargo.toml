@@ -16,10 +16,14 @@ jsonwebtoken = "9"
 rand = "0.8"
 sha2 = "0.10"
 hex = "0.4"
-tower-http = { version = "0.6", features = ["cors", "trace", "limit"] }
+tower-http = { version = "0.6", features = ["cors", "trace", "limit", "timeout", "compression-gzip", "request-id", "sensitive-headers", "catch-panic"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenvy = "0.15"
 thiserror = "2"
 anyhow = "1.0.103"
 async-openai = { version = "0.41.1", default-features = false, features = ["rustls", "chat-completion", "embedding"] }
+tower = { version = "0.5.3", features = ["limit", "load-shed", "util"] }
+axum-extra = { version = "0.12.6", features = ["cookie"] }
+time = "0.3.53"
+validator = { version = "0.20.0", features = ["derive"] }
