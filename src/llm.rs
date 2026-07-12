@@ -40,6 +40,7 @@ pub async fn chat_completion(
 
     let request = CreateChatCompletionRequestArgs::default()
         .model(&state.cfg.llm_model)
+        .max_completion_tokens(state.cfg.llm_max_tokens)
         .messages(messages)
         .build()
         .map_err(|e| {

@@ -31,6 +31,7 @@ pub struct Config {
     pub llm_base_url: String,
     pub llm_api_key: Option<String>,
     pub llm_model: String,
+    pub llm_max_tokens: u32,
     // Embeddings (OpenRouter doesn't serve embeddings, so this can point elsewhere,
     // e.g. OpenAI, Together, Jina, or a local server like Ollama/llama.cpp)
     pub embeddings_base_url: String,
@@ -68,6 +69,10 @@ impl Config {
             llm_model: std::env::var("LLM_MODEL")
                 .or_else(|_| std::env::var("OPENROUTER_MODEL"))
                 .unwrap_or_else(|_| "meta-llama/llama-3.3-70b-instruct".into()),
+            llm_max_tokens: std::env::var("LLM_MAX_TOKENS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1024),
             // Default to the same provider as chat; override only if your
             // chat provider doesn't serve embeddings (e.g. OpenRouter).
             embeddings_base_url: std::env::var("EMBEDDINGS_BASE_URL")
