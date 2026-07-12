@@ -27,3 +27,4 @@ tower = { version = "0.5.3", features = ["limit", "load-shed", "util"] }
 axum-extra = { version = "0.12.6", features = ["cookie"] }
 time = "0.3.53"
 validator = { version = "0.20.0", features = ["derive"] }
+tower_governor = "0.8.0"

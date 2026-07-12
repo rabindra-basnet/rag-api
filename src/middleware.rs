@@ -18,6 +18,9 @@ use tower_http::request_id::{MakeRequestUuid, PropagateRequestIdLayer, SetReques
 use tower_http::sensitive_headers::SetSensitiveRequestHeadersLayer;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
+use tower_governor::governor::GovernorConfigBuilder;
+use tower_governor::key_extractor::SmartIpKeyExtractor;
+use tower_governor::GovernorLayer;
 
 /// Generous: /documents and /chat wait on upstream LLM calls.
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
@@ -27,9 +30,29 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_BODY_BYTES: usize = 50 * 1024 * 1024;
 
 pub fn apply<S: Clone + Send + Sync + 'static>(router: Router<S>) -> Router<S> {
+    // Per-IP rate limit: bucket refills 5 req/s, bursts up to 50.
+    // SmartIpKeyExtractor honors Forwarded/X-Forwarded-For behind a proxy,
+    // falling back to the peer address.
+    let governor = GovernorConfigBuilder::default()
+        .key_extractor(SmartIpKeyExtractor)
+        .per_second(5)
+        .burst_size(50)
+        .finish()
+        .expect("valid governor config");
+    let governor = std::sync::Arc::new(governor);
+    // Evict idle per-IP buckets so the limiter's memory stays bounded.
+    let gc = governor.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            gc.limiter().retain_recent();
+        }
+    });
+
     router
         // innermost (closest to the handler)
         .layer(CatchPanicLayer::new()) // panic in a handler -> 500, not a dropped connection
+        .layer(GovernorLayer::new(governor))
         .layer(RequestBodyLimitLayer::new(MAX_BODY_BYTES))
         .layer(CompressionLayer::new())
         .layer(CorsLayer::permissive())
